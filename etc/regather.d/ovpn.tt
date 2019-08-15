@@ -1,0 +1,30 @@
+#-*- conf -*-
+# !!! AUTOMATICALY GENERATED !!!
+#
+# on [% date %]
+# OpenVPN client serverside configuration file
+#
+# entryUUID: [% entryUUID %]
+#  entryCSN: [% entryCSN %]
+#    server: [% server %]
+#        CN: [% CN %]
+#            (assigned to uid: [% uid %])
+#
+#   cert SN: [% SN %] not before [% notbefore %] not after [% notafter %]
+#    device: [% device %]
+#        OS: [% OS %]
+#   created: by [% createdby %], on [% createdon %]
+#  modified: by [% modifiedby %], on [% modifiedon %]
+#
+
+[% IF state == 'enabled' %]# [% END %]disable
+
+ifconfig-push [% ifconfigpush %]
+[% FOREACH item IN iroute %][% IF item != 'NA' %]
+iroute [% item %][% END %][% END %]
+
+[% FOREACH item IN push %][% IF item != 'NA' %]
+push "[% item %]"[% END %][% END %]
+
+[% IF config && config != 'NA' %]config [% config %][% END %]
+

@@ -1,0 +1,12 @@
+# -*- sieve -*-
+# !!! AUTOMATICALY GENERATED !!!
+#
+# on [% date %]
+# target email: [% DN.split(',').0.split('=').1 %]
+# user homeDirectory: [% homeDirectory %]
+# assigned to uid: [% uid %]
+#
+
+[% mu_sieveOnReceive %]
+
+# End of script

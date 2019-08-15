@@ -1,0 +1,435 @@
+#!/usr/bin/env perl
+# -*- mode: cperl; mode: follow; -*-
+#
+
+=head1 NAME
+
+ldap2cfg - syncrepl consumer to generate config files for different services
+
+=cut
+
+=head1 DESCRIPTION
+
+syncrepl consumer to generate config files for different services
+
+=cut
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-c | --config>
+
+config file ( mandatory)
+
+=item B<-F | --foreground>
+
+run in foreground
+
+=item B<-v>
+
+verbosity (incremental)
+
+=item B<-h | --help>
+
+help page
+
+=back
+
+=cut
+
+=head1 METHODS
+
+=cut
+
+use strict;
+use warnings;
+use diagnostics;
+use Pod::Usage qw(pod2usage);
+use POSIX;
+use Template;
+use Sys::Syslog qw(:standard :macros);
+use Getopt::Long;
+use Config::Tiny;
+use Data::Printer caller_info => 1, class => { expand => 2 };
+use List::Util qw( uniqstr );
+use IPC::Open2;
+use Try::Tiny;
+
+use Net::Server::Daemonize qw(daemonize check_pid_file unlink_pid_file);
+use Net::Server::SIG qw(register_sig);
+
+use Net::LDAP;
+use Net::LDAP::Control::SyncRequest;
+use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
+			    LDAP_SYNC_REFRESH_AND_PERSIST
+			    LDAP_SUCCESS
+			    LDAP_SYNC_PRESENT 
+			    LDAP_SYNC_ADD
+			    LDAP_SYNC_MODIFY
+			    LDAP_SYNC_DELETE
+			 );
+
+use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
+
+my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
+
+my @DAEMONARGS = ($0, @ARGV);
+
+my $fg      = 0;
+my $colors  = 0;
+my $verbose = 0;
+my $config  = '/usr/local/etc/ldap2cfg.conf';
+
+openlog($0, "ndelay,pid");
+
+Getopt::Long::Configure("no_ignore_case");
+my $get_opt_res =
+  GetOptions('F|foreground' => \$fg,
+	     'c|config=s'   => \$config,
+	     'colors'       => \$colors,
+	     'v+'           => \$verbose,
+	     'h|help'       => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
+	    );
+
+
+
+my $cfg = Config::Tiny->read( $config );
+pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]) if ! defined $cfg;
+
+logg({ fg => $fg, pr => 'info', fm => np($cfg) }) if $verbose > 2;
+
+if ( ! $fg ) {
+  try {
+    check_pid_file($cfg->{_}->{pid_file});
+  } catch {
+    logg({ fg => $fg, pr => 'err', fm => np($_) });
+    print "ERROR: $_\n";
+    exit 2;
+  };
+
+  unlink_pid_file($cfg->{_}->{pid_file});
+
+  daemonize( $cfg->{_}->{uid},
+	     $cfg->{_}->{gid},
+	     $cfg->{_}->{pid_file} // '/var/run/openldap/ldap2cfg.pid');
+
+  register_sig( HUP => sub { exec('perl', @DAEMONARGS); } );
+}
+
+my $req = Net::LDAP::Control::SyncRequest->new( mode     => LDAP_SYNC_REFRESH_AND_PERSIST,
+						critical => 1,
+						cookie   => undef, );
+
+our $s;
+my ( $ldap, $mesg, $tmp );
+
+my $cfgattrs = [];
+our $s_arr;
+@{$s_arr} = split /,/, $cfg->{_}->{services};
+foreach $s ( @{$s_arr} ) {
+  $cfgattrs = [ @{$cfgattrs},
+		values(%{$cfg->{$s . '_map_s'}}),
+		values(%{$cfg->{$s . '_map_m'}}), ];
+}
+my @sysattrs = qw( authorizedService
+		   entryUUID
+		   entryCSN
+		   createTimestamp
+		   creatorsName
+		   modifiersName
+		   modifyTimestamp );
+@{$tmp}   = uniqstr @{$cfgattrs};
+$cfgattrs = [ @{$tmp}, @sysattrs, ];
+
+while ( 1 ) {
+  $ldap = Net::LDAP->new( $cfg->{_}->{host},
+			  async => 1,
+			  debug => $cfg->{_}->{ldap_debug} // 0, );
+  logg({ fg => $fg, pr => 'info',
+	 fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
+	 ls => [ $cfg->{_}->{base},
+		 $cfg->{_}->{scope},
+		 $cfg->{_}->{filter},
+		 join("\n", @{$cfgattrs}) ] })
+    if $verbose > 2;
+
+  $mesg = $ldap->search( base     => $cfg->{_}->{base},
+			 scope    => $cfg->{_}->{scope},
+			 control  => [ $req ],
+			 callback => \&searchCallback,
+			 filter   => $cfg->{_}->{filter},
+			 attrs    => $cfgattrs,
+		       );
+}
+
+closelog();
+
+=head2 logg
+
+wrapper to log to syslog or stdin. On input it expects hash
+
+    fg => foreground: stdin or syslog
+    pr => priority: level[|facility]
+    fm => format: sprintf format
+    ls => list of values to be sprintf-ed with format fm
+
+=cut
+
+sub logg {
+  my $args = shift;
+  my $arg = { fg   => $args->{fg} // 0,
+	      pr   => $args->{pr} // 'info',
+	      pr_s => sprintf("%s|%s",
+			      $args->{pr}, $cfg->{_}->{log_facility} // 'CONFIG FILE ERROR'),
+	      pr_f => sprintf("<%s:%s> ",
+			      $cfg->{_}->{log_facility} // 'CONFIG FILE ERROR', $args->{pr}),
+	      fm   => $args->{fm},
+	      ls   => $args->{ls}  // [], };
+
+  if ( $arg->{fg} ) {
+    $arg->{msg} = sprintf $arg->{pr_f} . $arg->{fm}, @{$args->{ls}};
+    p($arg->{msg}, colored => $colors && $fg ? 1 : 0 );
+  } else {
+    syslog( $arg->{pr_s}, $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}} );
+  }
+}
+
+sub searchCallback {
+  my ( $msg, $obj ) = @_;
+  my @controls = $msg->control;
+  my $syncstate = scalar @controls ? $controls[0] : undef;
+  my $st;
+  my ( $tt, $tt_vars, $map, $tt_out_file, $tmp_debug_msg, $rdn);
+
+  logg({ fg => $fg, pr => 'debug', fm => "syncstate: %s", ls => [ np( $syncstate ) ] })
+    if $verbose > 3;
+  logg({ fg => $fg, pr => 'debug', fm => "object: %s", ls => [ np( $obj ) ] })
+    if $verbose > 3;
+
+  if ( defined $obj && $obj->isa('Net::LDAP::Entry') ) {
+
+    $rdn = ( split(/=/, ( split(/,/, $obj->dn) )[0]) )[0];
+
+    if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
+      $st = $syncstate->state;
+      if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
+	foreach $s ( @{$s_arr} ) {
+	  logg({ fg => $fg, pr => 'debug',
+		 fm => sprintf("WHICH SERVICE: %s; ctrl_attr %s: %s;DN: %s",
+			       $s, $cfg->{$s}->{ctrl_attr},
+			       $obj->exists($cfg->{$s}->{ctrl_attr}), $obj->dn) })
+	    if $verbose > 2;
+	  next if ! $obj->exists($cfg->{$s}->{ctrl_attr});
+
+	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn ] })
+	    if $verbose > 1;
+
+	  if ( exists $cfg->{$s}->{tt_out_file_pfx} && exists $cfg->{$s}->{tt_out_file} ) {
+	    $tt_out_file =
+	      sprintf("%s/%s%s",
+		      $obj->get_value($cfg->{$s}->{tt_out_file_pfx}),
+		      $cfg->{$s}->{tt_out_file},
+		      $cfg->{$s}->{tt_out_ext} // '');
+	  } elsif ( ! exists $cfg->{$s}->{tt_out_file_pfx} && exists $cfg->{$s}->{tt_out_file}) {
+	    $tt_out_file =
+	      sprintf("%s%s", $cfg->{$s}->{tt_out_file}, $cfg->{$s}->{tt_out_ext} // '');
+	  } elsif ( ! exists $cfg->{$s}->{tt_out_file_pfx} && ! exists $cfg->{$s}->{tt_out_file}) {
+	    $tt_out_file = sprintf("%s%s", $obj->get_value($rdn), $cfg->{$s}->{tt_out_ext} // '');
+	  }
+
+	  logg({ fg => $fg, pr => 'debug',
+		 fm => "TT OUTPUT FILE name: " . $tt_out_file })
+	    if $verbose > 2;
+
+	  #
+	  ## collecting all mapped attributes values
+	  #
+	  foreach my $i ( ( 'm', 's') ) {
+	    $map = $s . '_map_' . $i;
+	    if ( exists $cfg->{$map} ) {
+	      foreach my $j (keys ( %{$cfg->{$map}} )) {
+		if ( $j eq 'certificateRevocationList' ) {
+		  $tt_vars->{$j} = opensslize({ in => $obj->get_value($cfg->{$map}->{$j}) });
+		} else {
+		  $tt_vars->{$j} = $obj->get_value($cfg->{$map}->{$j}) // 'NA';
+		}
+	      }
+	    }
+	  }
+
+	  $tt_vars->{DN}         = $obj->dn;
+	  $tt_vars->{date}       = get_ts();
+	  $tt_vars->{server}     = ( split(/\@/, $obj->get_value('authorizedService')) )[1]
+	    if $obj->exists('authorizedService');
+	  $tt_vars->{createdby}  =
+	    ( split(/=/, ( split(/,/, $obj->get_value('creatorsName')) )[0]) )[1];
+	  $tt_vars->{modifiedby} =
+	    ( split(/=/, ( split(/,/, $obj->get_value('modifiersName')) )[0]) )[1];
+	  foreach ( reverse split(/,/, $obj->dn) ) {
+	    next if $_ !~ /^uid=/;
+	    $tt_vars->{uid} = ( split(/=/, $_) )[1];
+	    last;
+	  }
+
+	  unlink $cfg->{$s}->{tt_out_path} . '/' . $tt_out_file;
+
+	  $tt = Template->new( ABSOLUTE    => 1,
+			       RELATIVE    => 1,
+			       TRIM        => 1,
+			       DEBUG       => $fg // $cfg->{_}->{tt_debug},
+			       OUTPUT_PATH => $cfg->{$s}->{tt_out_path}, );
+
+	  $tt->process( sprintf("%s/%s", $cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}),
+			$tt_vars,
+			$tt_out_file
+		      ) or logg({ fg => $fg, pr => 'err',
+				  fm => "%s .tt process error: %s",
+				  ls => [ SYNST->[$st], $tt->error] });
+	}
+      } elsif ( $st == LDAP_SYNC_DELETE ) {
+	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn] })
+	    if $verbose > 1;
+	  unlink $cfg->{$s}->{tt_out_path} . '/' . $tt_out_file;
+      }
+    } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
+      logg({ fg => $fg, pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $verbose > 1;
+    } elsif ( ! defined $syncstate ) {
+      logg({ fg => $fg, pr => 'warning',
+	     fm => "LDAP entry without Sync State control" }) if $verbose > 1;
+    }
+
+    $req->cookie($syncstate->cookie) if $syncstate->cookie;
+
+  } elsif ( defined $obj && $obj->isa('Net::LDAP::Intermediate') ) {
+    $req->cookie($obj->{'asn'}->{'refreshDelete'}->{'cookie'});
+  }
+  elsif ( defined $obj && $obj->isa('Net::LDAP::Reference') ) {
+    return;
+  }
+  else {
+    return;
+  }
+}
+
+# get timestamp and return string in format `YYYY-mm-dd HH:MM:SS'
+sub get_ts {
+  my @ts_ar = localtime(time);
+  my $delim_date = '-';
+  my $delim_time = ':';
+  
+  $ts_ar[4]++;
+  $ts_ar[5] += 1900;
+  my @tstp = map { $_ = ($_ < 10) ? "0".$_ : $_ } @ts_ar;
+  return sprintf( "%s%s%s%s%s %s%s%s%s%s %s (%s)",
+		  $tstp[5], $delim_date, $tstp[4], $delim_date, $tstp[3],
+		  $tstp[2], $delim_time, $tstp[1], $delim_time, $tstp[0],
+		  strftime("%Z", localtime()),
+		  strftime("%z", localtime()) );
+ }
+
+sub opensslize {
+  my $args = shift;
+  my $arg = { cmd     => $args->{cmd}     // 'crl',
+	      in      => $args->{in},
+	      inform  => $args->{inform}  // 'DER',
+	      outform => $args->{outform} // 'PEM'
+	    };
+
+  my ( $chin, $chou );
+  my $pid = open2($chou, $chin,
+		  '/usr/bin/openssl', $arg->{cmd}, '-inform', $arg->{inform}, '-outform', $arg->{outform});
+
+  print $chin $arg->{in};
+  waitpid( $pid, 0 );
+  my $chst = $? >> 8;
+  if ( $chst ) {
+    logg({ fg => $fg, pr => 'err',
+	   fm => "opensslize() error!" }) if $verbose > 1;
+  };
+  
+  $arg->{res} .= $_ while ( <$chou> );
+  
+  return $arg->{res};
+}
+
+exit 0;
+
+=head1 USAGE
+
+ldap2cfg <-c ldap2cfg.conf> [ all other options ]
+
+=cut
+
+=head1 CONFIG FILE
+
+bellow is rather selfexplanatory example.
+
+=over 4
+
+=item B<services>
+
+is comma delimited names of the services we should process
+
+=item B<ctrl_attr>
+
+is LDAP attribute which is expected to be present in the object for
+this configuration section service, in case it is absent we start the
+next iteration of the I<services> loop.
+
+=back
+
+=head2 EXAMPLE
+
+    uid          = ldap
+    gid          = ldap
+    pid_file     = /var/run/openldap/ldap2cfg.pid
+    host         = ldap.server.foo.bar
+    log_facility = local4
+    services     = ovpn,sieve
+    tt_debug     = 1
+    tt_path      = /path/to/.tt/files
+    
+    base         = ou=People,dc=umidb
+    filter       = (|(&(objectClass=umiOvpnCfg)(authorizedService=ovpn*))(&(mu-sieveOnReceive=*)(authorizedService=mail*)))
+    scope        = sub
+    
+    [ovpn]
+    tt_out_path = /path/where/to/output/ovpn/configs
+    tt_file     = ovpn.tt
+    # tt_out_ext  = .ovpn
+    ctrl_attr   = umiOvpnCfgConfig
+    
+    [ovpn_map_s]
+    CN                = cn
+    OS                = umiOvpnAddDevOS
+    SN                = umiUserCertificateSn
+    config            = umiOvpnCfgConfig
+    createdon         = createTimestamp
+    device            = umiOvpnAddDevType
+    entryCSN          = entryCSN
+    entryUUID         = entryUUID
+    ifconfigpush      = umiOvpnCfgIfconfigPush
+    modifiedon        = modifyTimestamp
+    notafter          = umiUserCertificateNotAfter
+    notbefore         = umiUserCertificateNotBefore
+    state             = umiOvpnAddStatus
+    authorizedService = authorizedService
+    
+    [ovpn_map_m]
+    iroute       = umiOvpnCfgIroute
+    push         = umiOvpnCfgPush
+    
+    
+    [sieve]
+    tt_out_path     = /
+    tt_file         = sieve.tt
+    tt_out_file     = .sieve
+    tt_out_file_pfx = homeDirectory
+    ctrl_attr       = mu-sieveOnReceive
+    
+    [sieve_map_s]
+    mu_sieveOnReceive = mu-sieveOnReceive
+    homeDirectory     = homeDirectory
+
+=cut
