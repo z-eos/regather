@@ -4,7 +4,7 @@
 
 =head1 NAME
 
-ldap2cfg - syncrepl consumer to generate config files for different services
+regather - syncrepl consumer to generate config files for different services
 
 =cut
 
@@ -25,6 +25,18 @@ config file ( mandatory)
 =item B<-F | --foreground>
 
 run in foreground
+
+=item B<--colors>
+
+terminal colors are used in foreground debug output
+
+=item B<--ldap-debug>
+
+LDAP debug level
+    1   outgoing packets (asn_hexdump).
+    2   incoming packets (asn_hexdump).
+    4   outgoing packets (asn_dump).
+    8   incoming packets (asn_dump).
 
 =item B<-v>
 
@@ -55,12 +67,9 @@ use Data::Printer caller_info => 1, class => { expand => 2 };
 use List::Util qw( uniqstr );
 use IPC::Open2;
 use Try::Tiny;
-
-use Net::Server::Daemonize qw(daemonize check_pid_file unlink_pid_file);
-use Net::Server::SIG qw(register_sig);
+use File::Temp;
 
 use Net::LDAP;
-use Net::LDAP::Control::SyncRequest;
 use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_SYNC_REFRESH_AND_PERSIST
 			    LDAP_SUCCESS
@@ -69,6 +78,7 @@ use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_SYNC_MODIFY
 			    LDAP_SYNC_DELETE
 			 );
+use Net::LDAP::Control::SyncRequest;
 
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
@@ -79,7 +89,8 @@ my @DAEMONARGS = ($0, @ARGV);
 my $fg      = 0;
 my $colors  = 0;
 my $verbose = 0;
-my $config  = '/usr/local/etc/ldap2cfg.conf';
+my $config  = '/usr/local/etc/regather.conf';
+my $ldap_debug;
 
 openlog($0, "ndelay,pid");
 
@@ -88,33 +99,20 @@ my $get_opt_res =
   GetOptions('F|foreground' => \$fg,
 	     'c|config=s'   => \$config,
 	     'colors'       => \$colors,
+	     'ldap-debug=i' => \$ldap_debug,
 	     'v+'           => \$verbose,
 	     'h|help'       => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
 	    );
-
-
 
 my $cfg = Config::Tiny->read( $config );
 pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]) if ! defined $cfg;
 
 logg({ fg => $fg, pr => 'info', fm => np($cfg) }) if $verbose > 2;
 
+cfg_validate($cfg);
+
 if ( ! $fg ) {
-  try {
-    check_pid_file($cfg->{_}->{pid_file});
-  } catch {
-    logg({ fg => $fg, pr => 'err', fm => np($_) });
-    print "ERROR: $_\n";
-    exit 2;
-  };
-
-  unlink_pid_file($cfg->{_}->{pid_file});
-
-  daemonize( $cfg->{_}->{uid},
-	     $cfg->{_}->{gid},
-	     $cfg->{_}->{pid_file} // '/var/run/openldap/ldap2cfg.pid');
-
-  register_sig( HUP => sub { exec('perl', @DAEMONARGS); } );
+  daemonize();
 }
 
 my $req = Net::LDAP::Control::SyncRequest->new( mode     => LDAP_SYNC_REFRESH_AND_PERSIST,
@@ -126,7 +124,10 @@ my ( $ldap, $mesg, $tmp );
 
 my $cfgattrs = [];
 our $s_arr;
-@{$s_arr} = split /,/, $cfg->{_}->{services};
+foreach (keys (%{$cfg->{services}})) {
+  push @{$s_arr}, $_ if $cfg->{services}->{$_} eq 'yes';
+}
+
 foreach $s ( @{$s_arr} ) {
   $cfgattrs = [ @{$cfgattrs},
 		values(%{$cfg->{$s . '_map_s'}}),
@@ -143,9 +144,11 @@ my @sysattrs = qw( authorizedService
 $cfgattrs = [ @{$tmp}, @sysattrs, ];
 
 while ( 1 ) {
+
   $ldap = Net::LDAP->new( $cfg->{_}->{host},
-			  async => 1,
-			  debug => $cfg->{_}->{ldap_debug} // 0, );
+			  # async => 1,
+			  debug => $ldap_debug // $cfg->{_}->{ldap_debug} // 0,
+			);
   logg({ fg => $fg, pr => 'info',
 	 fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
 	 ls => [ $cfg->{_}->{base},
@@ -161,9 +164,120 @@ while ( 1 ) {
 			 filter   => $cfg->{_}->{filter},
 			 attrs    => $cfgattrs,
 		       );
+  if ( $mesg->code ) {
+    logg({ fg => $fg, pr => 'info',
+	   fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
+	   ls => [ $mesg->{error_name},
+		   $mesg->{error_text},
+		   $mesg->{mesg_id},
+		   $mesg->dn ] });
+  }
 }
 
 closelog();
+
+sub cfg_validate {
+  my $cfg = shift;
+  my $cfg_item;
+
+  my @svc;
+  if ( exists $cfg->{services} ) {
+    foreach (sort (keys (%{$cfg->{services}}))) {
+      push @svc, $_ if $cfg->{services}->{$_} eq 'yes';
+    }
+  } else {
+    print "cfg_validate(): services is a mandatory section, you must provide at least one\n\n";
+    exit 2;
+  }
+
+  foreach ( @svc ) {
+    p $_;
+    p $cfg->{$_}->{out_path};
+    if ( ! -d $cfg->{$_}->{out_path} ) {
+      print "cfg_validate(): service $_ out_path: $cfg->{$_}->{out_path} does not exist\n\n";
+      exit 2;
+    }
+  }
+
+  if ( exists $cfg->{_}->{uid} ) {
+    $cfg_item = getpwnam( $cfg->{_}->{uid} );
+    if ( defined $cfg_item ) {
+      logg({ fg => $fg, pr => 'info',
+	     fm => "setuid user %s(%s) confirmed", ls => [ $cfg->{_}->{uid}, $cfg_item ] })
+	if $verbose > 1;
+      $cfg->{_}->{uid_number} = $cfg_item;
+    } else {
+      print "cfg_validate(): No user $cfg->{_}->{uid} exist\n\n";
+      exit 2;
+    }
+  }
+  if ( exists $cfg->{_}->{gid} ) {
+    $cfg_item  = getgrnam( $cfg->{_}->{gid} );
+    if ( defined $cfg_item ) {
+      logg({ fg => $fg, pr => 'info',
+	     fm => "setgid group %s(%s) confirmed", ls => [ $cfg->{_}->{gid}, $cfg_item ] })
+	if $verbose > 1;
+      $cfg->{_}->{gid_number} = $cfg_item;
+    } else {
+      print "cfg_validate(): No group $cfg->{_}->{gid} exist\n\n";
+      exit 2;
+    }
+  }
+}
+
+=head2 daemonize
+
+do daemonization of ourselves
+
+=cut
+
+sub daemonize {
+  my $pid;
+  if ( -e $cfg->{_}->{pid_file} ) {
+
+    open( my $fh, "<", $cfg->{_}->{pid_file}) ||
+      die "Can't open $cfg->{_}->{pid_file} for reading: $!";
+    $pid = <$fh>;
+    close($fh) ||
+      die "close $cfg->{_}->{pid_file} (opened for reading) failed: $!";
+
+    if ( kill(0, $pid) ) {
+      print "Doing nothing\npidfile $cfg->{_}->{pid_file} of proces with pid $pid, exists and the very process is alive\n\n";
+      exit 1;
+    } else {
+      unlink $cfg->{_}->{pid_file};
+      logg({ fg => $fg, pr => 'debug', fm => "old pid file was removed" })
+	if $verbose > 0;
+    }
+    undef $pid;
+  }
+
+  try { $pid = fork(); } catch { die "fork went wrong: $!"; };
+  exit(0) if $pid != 0;
+
+  setsid || die "setsid went wrong: $!";
+
+  open( my $pp, ">", $cfg->{_}->{pid_file}) ||
+    die "Can't open $cfg->{_}->{pid_file} for writing: $!";
+  print $pp "$$";
+  close( $pp ) ||
+    die "close $cfg->{_}->{pid_file} (opened for writing), failed: $!";
+
+  # open (STDIN,  "</dev/null");
+  # open (STDOUT, ">/dev/null");
+  # open (STDERR, ">&STDOUT");
+
+  $SIG{HUP}  = sub { logg({ fg => $fg, pr => 'warning', fm => "HUP SIG received" });
+		     exec('perl', @DAEMONARGS); };
+  $SIG{USR1} = sub { logg({ fg => $fg, pr => 'warning', fm => "USR1 SIG received" }) };
+  $SIG{TERM} = sub { logg({ fg => $fg, pr => 'warning', fm => "TERM SIG received" });
+		     exit 0;};
+
+  if ( exists $cfg->{_}->{uid} && exists $cfg->{_}->{gid} ) {
+    try { setgid ( $cfg->{_}->{gid_number} ) } catch { die "setgid went wrong: $!"};
+    try { setuid ( $cfg->{_}->{uid_number} ) } catch { die "setuid went wrong: $!"};
+  }
+}
 
 =head2 logg
 
@@ -200,7 +314,7 @@ sub searchCallback {
   my @controls = $msg->control;
   my $syncstate = scalar @controls ? $controls[0] : undef;
   my $st;
-  my ( $tt, $tt_vars, $map, $tt_out_file, $tmp_debug_msg, $rdn);
+  my ( $tt, $tt_vars, $map, $out_file_pfx, $out_file, $tmp_debug_msg, $rdn);
 
   logg({ fg => $fg, pr => 'debug', fm => "syncstate: %s", ls => [ np( $syncstate ) ] })
     if $verbose > 3;
@@ -225,21 +339,25 @@ sub searchCallback {
 	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn ] })
 	    if $verbose > 1;
 
-	  if ( exists $cfg->{$s}->{tt_out_file_pfx} && exists $cfg->{$s}->{tt_out_file} ) {
-	    $tt_out_file =
+	  if ( exists $cfg->{$s}->{out_file_pfx} && exists $cfg->{$s}->{out_file} ) {
+	    $out_file_pfx = $obj->get_value($cfg->{$s}->{out_file_pfx});
+	    if ( ! -d $out_file_pfx ) {
+	      logg({ fg => $fg, pr => 'err', fm => "service %s, target directory %s doesn't exist",
+		     ls => [ $s, $out_file_pfx ] });
+	      next;
+	    }
+	    $out_file =
 	      sprintf("%s/%s%s",
-		      $obj->get_value($cfg->{$s}->{tt_out_file_pfx}),
-		      $cfg->{$s}->{tt_out_file},
-		      $cfg->{$s}->{tt_out_ext} // '');
-	  } elsif ( ! exists $cfg->{$s}->{tt_out_file_pfx} && exists $cfg->{$s}->{tt_out_file}) {
-	    $tt_out_file =
-	      sprintf("%s%s", $cfg->{$s}->{tt_out_file}, $cfg->{$s}->{tt_out_ext} // '');
-	  } elsif ( ! exists $cfg->{$s}->{tt_out_file_pfx} && ! exists $cfg->{$s}->{tt_out_file}) {
-	    $tt_out_file = sprintf("%s%s", $obj->get_value($rdn), $cfg->{$s}->{tt_out_ext} // '');
+		      $out_file_pfx, $cfg->{$s}->{out_file}, $cfg->{$s}->{out_ext} // '');
+	  } elsif ( ! exists $cfg->{$s}->{out_file_pfx} && exists $cfg->{$s}->{out_file}) {
+	    $out_file =
+	      sprintf("%s%s", $cfg->{$s}->{out_file}, $cfg->{$s}->{out_ext} // '');
+	  } elsif ( ! exists $cfg->{$s}->{out_file_pfx} && ! exists $cfg->{$s}->{out_file}) {
+	    $out_file = sprintf("%s%s", $obj->get_value($rdn), $cfg->{$s}->{out_ext} // '');
 	  }
 
 	  logg({ fg => $fg, pr => 'debug',
-		 fm => "TT OUTPUT FILE name: " . $tt_out_file })
+		 fm => "TT OUTPUT FILE name: " . $out_file })
 	    if $verbose > 2;
 
 	  #
@@ -272,25 +390,43 @@ sub searchCallback {
 	    last;
 	  }
 
-	  unlink $cfg->{$s}->{tt_out_path} . '/' . $tt_out_file;
+	  my $tmp_fh = File::Temp->new( UNLINK => 0,
+					DIR => $out_file_pfx // $cfg->{$s}->{out_path} );
+	  my $tmp_fn = $tmp_fh->filename;
+	  # my $seclevel = File::Temp->safe_level( File::Temp::HIGH );
+	  # if ( $seclevel != File::Temp::HIGH ) {
+	  #   print "Could not change to high security level...\n\n";
+	  #   exit 2;
+	  # }
 
-	  $tt = Template->new( ABSOLUTE    => 1,
+	  $tt = Template->new( TRIM        => 1,
+			       ABSOLUTE    => 1,
 			       RELATIVE    => 1,
-			       TRIM        => 1,
-			       DEBUG       => $fg // $cfg->{_}->{tt_debug},
-			       OUTPUT_PATH => $cfg->{$s}->{tt_out_path}, );
+			       OUTPUT_PATH => $out_file_pfx // $cfg->{$s}->{out_path},
+			       DEBUG       => $fg // $cfg->{_}->{tt_debug}, );
 
-	  $tt->process( sprintf("%s/%s", $cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}),
-			$tt_vars,
-			$tt_out_file
-		      ) or logg({ fg => $fg, pr => 'err',
-				  fm => "%s .tt process error: %s",
-				  ls => [ SYNST->[$st], $tt->error] });
+	  try {
+	    $tt->process( sprintf("%s/%s", $cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}),
+			  $tt_vars,
+			  $tmp_fh
+			);
+	  } catch {
+	    logg({ fg => $fg, pr => 'err',
+		   fm => "%s .tt process error: %s",
+		   ls => [ SYNST->[$st], $tt->error] });
+	  };
+	  close( $tmp_fh )||
+	    die "close $tmp_fn (opened for writing) failed: $!";
+
+	  chdir $cfg->{$s}->{out_path};
+	  rename $tmp_fn, $out_file;
+	  chmod oct($cfg->{$s}->{chmod}), $out_file;
+	  
 	}
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn] })
 	    if $verbose > 1;
-	  unlink $cfg->{$s}->{tt_out_path} . '/' . $tt_out_file;
+	  unlink $cfg->{$s}->{out_path} . '/' . $out_file;
       }
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
       logg({ fg => $fg, pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $verbose > 1;
@@ -357,13 +493,16 @@ exit 0;
 
 =head1 USAGE
 
-ldap2cfg <-c ldap2cfg.conf> [ all other options ]
+regather <-c regather.conf> [ all other options ]
 
 =cut
 
-=head1 CONFIG FILE
+=head1 FILES
 
-bellow is rather selfexplanatory example.
+    /usr/local/etc/regather.d/*.tt templates to generate files from
+    /usr/local/etc/regather.conf   config file
+
+=head1 CONFIG FILE
 
 =over 4
 
@@ -378,58 +517,3 @@ this configuration section service, in case it is absent we start the
 next iteration of the I<services> loop.
 
 =back
-
-=head2 EXAMPLE
-
-    uid          = ldap
-    gid          = ldap
-    pid_file     = /var/run/openldap/ldap2cfg.pid
-    host         = ldap.server.foo.bar
-    log_facility = local4
-    services     = ovpn,sieve
-    tt_debug     = 1
-    tt_path      = /path/to/.tt/files
-    
-    base         = ou=People,dc=umidb
-    filter       = (|(&(objectClass=umiOvpnCfg)(authorizedService=ovpn*))(&(mu-sieveOnReceive=*)(authorizedService=mail*)))
-    scope        = sub
-    
-    [ovpn]
-    tt_out_path = /path/where/to/output/ovpn/configs
-    tt_file     = ovpn.tt
-    # tt_out_ext  = .ovpn
-    ctrl_attr   = umiOvpnCfgConfig
-    
-    [ovpn_map_s]
-    CN                = cn
-    OS                = umiOvpnAddDevOS
-    SN                = umiUserCertificateSn
-    config            = umiOvpnCfgConfig
-    createdon         = createTimestamp
-    device            = umiOvpnAddDevType
-    entryCSN          = entryCSN
-    entryUUID         = entryUUID
-    ifconfigpush      = umiOvpnCfgIfconfigPush
-    modifiedon        = modifyTimestamp
-    notafter          = umiUserCertificateNotAfter
-    notbefore         = umiUserCertificateNotBefore
-    state             = umiOvpnAddStatus
-    authorizedService = authorizedService
-    
-    [ovpn_map_m]
-    iroute       = umiOvpnCfgIroute
-    push         = umiOvpnCfgPush
-    
-    
-    [sieve]
-    tt_out_path     = /
-    tt_file         = sieve.tt
-    tt_out_file     = .sieve
-    tt_out_file_pfx = homeDirectory
-    ctrl_attr       = mu-sieveOnReceive
-    
-    [sieve_map_s]
-    mu_sieveOnReceive = mu-sieveOnReceive
-    homeDirectory     = homeDirectory
-
-=cut
