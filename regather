@@ -124,9 +124,7 @@ my ( $ldap, $mesg, $tmp );
 
 my $cfgattrs = [];
 our $s_arr;
-foreach (keys (%{$cfg->{services}})) {
-  push @{$s_arr}, $_ if $cfg->{services}->{$_} eq 'yes';
-}
+@{$s_arr} = grep { $_ if $cfg->{services}->{$_} eq 'yes' } keys(%{$cfg->{services}});
 
 foreach $s ( @{$s_arr} ) {
   $cfgattrs = [ @{$cfgattrs},
@@ -377,7 +375,7 @@ sub searchCallback {
 	  }
 
 	  $tt_vars->{DN}         = $obj->dn;
-	  $tt_vars->{date}       = get_ts();
+	  $tt_vars->{date}       = strftime( "%a, %F %T %Z (%z)", localtime(time));
 	  $tt_vars->{server}     = ( split(/\@/, $obj->get_value('authorizedService')) )[1]
 	    if $obj->exists('authorizedService');
 	  $tt_vars->{createdby}  =
@@ -447,22 +445,6 @@ sub searchCallback {
     return;
   }
 }
-
-# get timestamp and return string in format `YYYY-mm-dd HH:MM:SS'
-sub get_ts {
-  my @ts_ar = localtime(time);
-  my $delim_date = '-';
-  my $delim_time = ':';
-  
-  $ts_ar[4]++;
-  $ts_ar[5] += 1900;
-  my @tstp = map { $_ = ($_ < 10) ? "0".$_ : $_ } @ts_ar;
-  return sprintf( "%s%s%s%s%s %s%s%s%s%s %s (%s)",
-		  $tstp[5], $delim_date, $tstp[4], $delim_date, $tstp[3],
-		  $tstp[2], $delim_time, $tstp[1], $delim_time, $tstp[0],
-		  strftime("%Z", localtime()),
-		  strftime("%z", localtime()) );
- }
 
 sub opensslize {
   my $args = shift;
