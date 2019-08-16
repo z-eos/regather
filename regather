@@ -77,6 +77,7 @@ use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_SYNC_ADD
 			    LDAP_SYNC_MODIFY
 			    LDAP_SYNC_DELETE
+			    LDAP_OPERATIONS_ERROR
 			 );
 use Net::LDAP::Control::SyncRequest;
 
@@ -189,8 +190,6 @@ sub cfg_validate {
   }
 
   foreach ( @svc ) {
-    p $_;
-    p $cfg->{$_}->{out_path};
     if ( ! -d $cfg->{$_}->{out_path} ) {
       print "cfg_validate(): service $_ out_path: $cfg->{$_}->{out_path} does not exist\n\n";
       exit 2;
@@ -218,7 +217,7 @@ sub cfg_validate {
       $cfg->{_}->{gid_number} = $cfg_item;
     } else {
       print "cfg_validate(): No group $cfg->{_}->{gid} exist\n\n";
-      exit 2;
+      return 1;
     }
   }
 }
@@ -240,12 +239,18 @@ sub daemonize {
       die "close $cfg->{_}->{pid_file} (opened for reading) failed: $!";
 
     if ( kill(0, $pid) ) {
-      print "Doing nothing\npidfile $cfg->{_}->{pid_file} of proces with pid $pid, exists and the very process is alive\n\n";
+      print "Doing nothing\npidfile $cfg->{_}->{pid_file} of the proces with pid $pid, exists and the very process is alive\n\n";
       exit 1;
     } else {
-      unlink $cfg->{_}->{pid_file};
-      logg({ fg => $fg, pr => 'debug', fm => "old pid file was removed" })
-	if $verbose > 0;
+      my $orphaned_pid_mtime = get_mtime($cfg->{_}->{pid_file});
+      if ( unlink $cfg->{_}->{pid_file} ) {
+	logg({ fg => $fg, pr => 'debug', fm => "orphaned pid file was removed" })
+	  if $verbose > 0;
+      } else {
+	logg({ fg => $fg, pr => 'err', fm => "orphaned pid (mtime: %s) file was not removed: %s",
+	       ls => [ $orphaned_pid_mtime, $! ] });
+	exit 2;
+      }
     }
     undef $pid;
   }
@@ -388,14 +393,22 @@ sub searchCallback {
 	    last;
 	  }
 
-	  my $tmp_fh = File::Temp->new( UNLINK => 0,
-					DIR => $out_file_pfx // $cfg->{$s}->{out_path} );
-	  my $tmp_fn = $tmp_fh->filename;
-	  # my $seclevel = File::Temp->safe_level( File::Temp::HIGH );
-	  # if ( $seclevel != File::Temp::HIGH ) {
-	  #   print "Could not change to high security level...\n\n";
-	  #   exit 2;
-	  # }
+	  my ( $tmp_fh, $tmp_fn);
+	  try {
+	    $tmp_fh = File::Temp->new( UNLINK => 0,
+				       DIR => $out_file_pfx // $cfg->{$s}->{out_path} );
+	    $tmp_fn = $tmp_fh->filename;
+	    # my $seclevel = File::Temp->safe_level( File::Temp::HIGH );
+	    # if ( $seclevel != File::Temp::HIGH ) {
+	    #   print "Could not change to high security level...\n\n";
+	    #   exit 2;
+	    # }
+	  } catch {
+	    logg({ fg => $fg, pr => 'err', fm => "File::Temp->new( DIR => %s ) error: %s",
+		   ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $! ] });
+	    # return LDAP_OPERATIONS_ERROR;
+	    exit 2;
+	  };
 
 	  $tt = Template->new( TRIM        => 1,
 			       ABSOLUTE    => 1,
@@ -413,19 +426,45 @@ sub searchCallback {
 		   fm => "%s .tt process error: %s",
 		   ls => [ SYNST->[$st], $tt->error] });
 	  };
-	  close( $tmp_fh )||
+	  close( $tmp_fh ) ||
 	    die "close $tmp_fn (opened for writing) failed: $!";
 
-	  chdir $cfg->{$s}->{out_path};
-	  rename $tmp_fn, $out_file;
-	  chmod oct($cfg->{$s}->{chmod}), $out_file;
+	  if ( -d $cfg->{$s}->{out_path} ) {
+	    chdir $cfg->{$s}->{out_path} ||
+	      logg({ fg => $fg, pr => 'err', fm => "chdir to %s failed",
+		     ls => [ $cfg->{$s}->{out_path} ] });
+	  } else {
+	    logg({ fg => $fg, pr => 'err', fm => "chdir to %s failed, wrong path",
+		   ls => [ $cfg->{$s}->{out_path} ] });
+	  }
+
+	  rename $tmp_fn, $out_file ||
+	    logg({ fg => $fg, pr => 'err', fm => "rename %s to %s, failed",
+		   ls => [ $tmp_fn, $out_file ] });
+
+	  if ( -e $out_file ) {
+	    chmod oct($cfg->{$s}->{chmod}), $out_file ||
+	      logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed",
+		     ls => [ $out_file ] });
+	  } else {
+	    logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed, no such file",
+		   ls => [ $out_file ] });
+	  }
 	  
 	}
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn] })
 	    if $verbose > 1;
-	  unlink $cfg->{$s}->{out_path} . '/' . $out_file;
-      }
+	  if ( unlink $cfg->{$s}->{out_path} . '/' . $out_file ) {
+	    logg({ fg => $fg, pr => 'debug', fm => "file %s was successfully removed",
+		 ls => [ $cfg->{$s}->{out_path} . '/' . $out_file ] })
+	      if $verbose > 0;
+	  } else {
+	    logg({ fg => $fg, pr => 'err',
+		   fm => "file %s was not removed",
+		   ls => [ $cfg->{$s}->{out_path} . '/' . $out_file, $! ] });
+	  }
+	}
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
       logg({ fg => $fg, pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $verbose > 1;
     } elsif ( ! defined $syncstate ) {
@@ -469,6 +508,10 @@ sub opensslize {
   $arg->{res} .= $_ while ( <$chou> );
   
   return $arg->{res};
+}
+
+sub get_mtime {
+  return strftime("%F %T %Z (%z)", localtime( (stat( shift ))[9] ));
 }
 
 exit 0;
