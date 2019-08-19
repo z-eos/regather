@@ -68,6 +68,7 @@ use List::Util qw( uniqstr );
 use IPC::Open2;
 use Try::Tiny;
 use File::Temp;
+use File::Basename;
 
 use Net::LDAP;
 use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
@@ -84,8 +85,10 @@ use Net::LDAP::Control::SyncRequest;
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
+my $ts_fmt = "%a %F %T %Z (%z)";
 
 my @DAEMONARGS = ($0, @ARGV);
+my $PROGNAME   = fileparse($0);
 
 my $fg      = 0;
 my $colors  = 0;
@@ -93,7 +96,7 @@ my $verbose = 0;
 my $config  = '/usr/local/etc/regather.conf';
 my $ldap_debug;
 
-openlog($0, "ndelay,pid");
+openlog($PROGNAME, "ndelay,pid");
 
 Getopt::Long::Configure("no_ignore_case");
 my $get_opt_res =
@@ -124,10 +127,10 @@ our $s;
 my ( $ldap, $mesg, $tmp );
 
 my $cfgattrs = [];
-our $s_arr;
-@{$s_arr} = grep { $_ if $cfg->{services}->{$_} eq 'yes' } keys(%{$cfg->{services}});
+our @s_arr;
+@s_arr = grep { $_ if $cfg->{services}->{$_} eq 'yes' } keys(%{$cfg->{services}});
 
-foreach $s ( @{$s_arr} ) {
+foreach $s ( @s_arr ) {
   $cfgattrs = [ @{$cfgattrs},
 		values(%{$cfg->{$s . '_map_s'}}),
 		values(%{$cfg->{$s . '_map_m'}}), ];
@@ -159,7 +162,7 @@ while ( 1 ) {
   $mesg = $ldap->search( base     => $cfg->{_}->{base},
 			 scope    => $cfg->{_}->{scope},
 			 control  => [ $req ],
-			 callback => \&searchCallback,
+			 callback => \&ldap_search_callback,
 			 filter   => $cfg->{_}->{filter},
 			 attrs    => $cfgattrs,
 		       );
@@ -174,6 +177,12 @@ while ( 1 ) {
 }
 
 closelog();
+
+exit 0;
+
+#
+## ===================================================================
+#
 
 sub cfg_validate {
   my $cfg = shift;
@@ -229,29 +238,32 @@ do daemonization of ourselves
 =cut
 
 sub daemonize {
-  my $pid;
+  my ( $pid, $fh, $pp, $orphaned_pid_mtime );
   if ( -e $cfg->{_}->{pid_file} ) {
-
-    open( my $fh, "<", $cfg->{_}->{pid_file}) ||
+    try {
+      open( $fh, "<", $cfg->{_}->{pid_file});
+      $pid = <$fh>;
+    } catch {
       die "Can't open $cfg->{_}->{pid_file} for reading: $!";
-    $pid = <$fh>;
-    close($fh) ||
-      die "close $cfg->{_}->{pid_file} (opened for reading) failed: $!";
+    };
+    try { close($fh); } catch { die "close $cfg->{_}->{pid_file} (opened for reading) failed: $!"; };
 
     if ( kill(0, $pid) ) {
       print "Doing nothing\npidfile $cfg->{_}->{pid_file} of the proces with pid $pid, exists and the very process is alive\n\n";
       exit 1;
-    } else {
-      my $orphaned_pid_mtime = get_mtime($cfg->{_}->{pid_file});
-      if ( unlink $cfg->{_}->{pid_file} ) {
-	logg({ fg => $fg, pr => 'debug', fm => "orphaned pid file was removed" })
-	  if $verbose > 0;
-      } else {
-	logg({ fg => $fg, pr => 'err', fm => "orphaned pid (mtime: %s) file was not removed: %s",
-	       ls => [ $orphaned_pid_mtime, $! ] });
-	exit 2;
-      }
     }
+
+    $orphaned_pid_mtime = strftime( $ts_fmt, localtime( (stat( $cfg->{_}->{pid_file} ))[9] ));
+    if ( unlink $cfg->{_}->{pid_file} ) {
+      logg({ fg => $fg, pr => 'debug', fm => "orphaned %s was removed",
+	     ls => [ $cfg->{_}->{pid_file} ] })
+	if $verbose > 0;
+    } else {
+      logg({ fg => $fg, pr => 'err', fm => "orphaned %s (mtime: %s) was not removed: %s",
+	     ls => [ $cfg->{_}->{pid_file}, $orphaned_pid_mtime, $! ] });
+      exit 2;
+    }
+
     undef $pid;
   }
 
@@ -260,15 +272,13 @@ sub daemonize {
 
   setsid || die "setsid went wrong: $!";
 
-  open( my $pp, ">", $cfg->{_}->{pid_file}) ||
-    die "Can't open $cfg->{_}->{pid_file} for writing: $!";
+  try { open( $pp, ">", $cfg->{_}->{pid_file}); } catch { die "Can't open $cfg->{_}->{pid_file} for writing: $!"; };
   print $pp "$$";
-  close( $pp ) ||
-    die "close $cfg->{_}->{pid_file} (opened for writing), failed: $!";
+  try { close( $pp ); } catch { die "close $cfg->{_}->{pid_file} (opened for writing), failed: $!"; };
 
-  # open (STDIN,  "</dev/null");
-  # open (STDOUT, ">/dev/null");
-  # open (STDERR, ">&STDOUT");
+  try { open (STDIN,  "</dev/null"); } catch { die "Can't redirect /dev/null to STDIN"; };
+  try { open (STDOUT, ">/dev/null"); } catch { die "Can't redirect to STDOUT to /dev/null"; };
+  try { open (STDERR, ">&STDOUT");   } catch { die "Can't redirect STDERR to STDOUT"; };
 
   $SIG{HUP}  = sub { logg({ fg => $fg, pr => 'warning', fm => "HUP SIG received" });
 		     exec('perl', @DAEMONARGS); };
@@ -280,6 +290,7 @@ sub daemonize {
     try { setgid ( $cfg->{_}->{gid_number} ) } catch { die "setgid went wrong: $!"};
     try { setuid ( $cfg->{_}->{uid_number} ) } catch { die "setuid went wrong: $!"};
   }
+
 }
 
 =head2 logg
@@ -312,7 +323,7 @@ sub logg {
   }
 }
 
-sub searchCallback {
+sub ldap_search_callback {
   my ( $msg, $obj ) = @_;
   my @controls = $msg->control;
   my $syncstate = scalar @controls ? $controls[0] : undef;
@@ -331,7 +342,7 @@ sub searchCallback {
     if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
       $st = $syncstate->state;
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
-	foreach $s ( @{$s_arr} ) {
+	foreach $s ( @s_arr ) {
 	  logg({ fg => $fg, pr => 'debug',
 		 fm => sprintf("WHICH SERVICE: %s; ctrl_attr %s: %s;DN: %s",
 			       $s, $cfg->{$s}->{ctrl_attr},
@@ -380,7 +391,7 @@ sub searchCallback {
 	  }
 
 	  $tt_vars->{DN}         = $obj->dn;
-	  $tt_vars->{date}       = strftime( "%a, %F %T %Z (%z)", localtime(time));
+	  $tt_vars->{date}       = strftime( $ts_fmt, localtime(time));
 	  $tt_vars->{server}     = ( split(/\@/, $obj->get_value('authorizedService')) )[1]
 	    if $obj->exists('authorizedService');
 	  $tt_vars->{createdby}  =
@@ -404,10 +415,8 @@ sub searchCallback {
 	    #   exit 2;
 	    # }
 	  } catch {
-	    logg({ fg => $fg, pr => 'err', fm => "File::Temp->new( DIR => %s ) error: %s",
-		   ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $! ] });
-	    # return LDAP_OPERATIONS_ERROR;
-	    exit 2;
+	    logg({ fg => $fg, pr => 'err', fm => "File::Temp->new( DIR => %s ) for service %s error: %s",
+		   ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $s, $! ] });
 	  };
 
 	  $tt = Template->new( TRIM        => 1,
@@ -417,17 +426,20 @@ sub searchCallback {
 			       DEBUG       => $fg // $cfg->{_}->{tt_debug}, );
 
 	  try {
-	    $tt->process( sprintf("%s/%s", $cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}),
-			  $tt_vars,
-			  $tmp_fh
-			);
+	    $tt->process( sprintf("%s/%s",
+				  $cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}), $tt_vars, $tmp_fh );
 	  } catch {
-	    logg({ fg => $fg, pr => 'err',
-		   fm => "%s .tt process error: %s",
+	    logg({ fg => $fg, pr => 'err', fm => "%s .tt process error: %s",
 		   ls => [ SYNST->[$st], $tt->error] });
 	  };
-	  close( $tmp_fh ) ||
-	    die "close $tmp_fn (opened for writing) failed: $!";
+
+	  try {
+	    close( $tmp_fh );
+	  } catch {
+	    logg({ fg => $fg, pr => 'err',
+		   fm => "close file (opened for writing), service %s, failed: %s",
+		   ls => [ $s, $! ] });
+	  };
 
 	  if ( -d $cfg->{$s}->{out_path} ) {
 	    chdir $cfg->{$s}->{out_path} ||
@@ -450,7 +462,6 @@ sub searchCallback {
 	    logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed, no such file",
 		   ls => [ $out_file ] });
 	  }
-	  
 	}
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn] })
@@ -513,8 +524,6 @@ sub opensslize {
 sub get_mtime {
   return strftime("%F %T %Z (%z)", localtime( (stat( shift ))[9] ));
 }
-
-exit 0;
 
 =head1 USAGE
 
