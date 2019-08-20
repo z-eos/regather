@@ -1,14 +1,18 @@
 #-*- conf -*-
 # !!! AUTOMATICALY GENERATED !!!
 #
-# on [% date %]
+# by [% prog %] on [% date %]
 # OpenVPN client serverside configuration file
 #
-# entryUUID: [% entryUUID %]
-#  entryCSN: [% entryCSN %]
-#    server: [% server %]
-#        CN: [% CN %]
-#            (assigned to uid: [% uid %])
+#   entryUUID: [% entryUUID %]
+#    entryCSN: [% entryCSN %]
+#      server: [% server %]
+#          CN: [% CN %]
+#              (assigned to uid: [% uid %])
+[% IF descr -%]
+#
+# description: [% descr.replace('\n', '; ') %]
+[% END -%]
 #
 #   cert SN: [% SN %] not before [% notbefore %] not after [% notafter %]
 #    device: [% device %]

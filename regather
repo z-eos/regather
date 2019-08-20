@@ -79,6 +79,7 @@ use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_SYNC_MODIFY
 			    LDAP_SYNC_DELETE
 			    LDAP_OPERATIONS_ERROR
+			    LDAP_LOCAL_ERROR
 			 );
 use Net::LDAP::Control::SyncRequest;
 
@@ -88,15 +89,16 @@ my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
 my $ts_fmt = "%a %F %T %Z (%z)";
 
 my @DAEMONARGS = ($0, @ARGV);
-my $PROGNAME   = fileparse($0);
+my $PROGNAM    = fileparse($0);
+my $PROGVER    = '0.5';
 
 my $fg      = 0;
 my $colors  = 0;
-my $verbose = 0;
+our $v       = 0;
 my $config  = '/usr/local/etc/regather.conf';
 my $ldap_debug;
 
-openlog($PROGNAME, "ndelay,pid");
+openlog($PROGNAM, "ndelay,pid");
 
 Getopt::Long::Configure("no_ignore_case");
 my $get_opt_res =
@@ -104,38 +106,33 @@ my $get_opt_res =
 	     'c|config=s'   => \$config,
 	     'colors'       => \$colors,
 	     'ldap-debug=i' => \$ldap_debug,
-	     'v+'           => \$verbose,
+	     'v+'           => \$v,
 	     'h|help'       => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
 	    );
 
 my $cfg = Config::Tiny->read( $config );
 pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]) if ! defined $cfg;
 
-logg({ fg => $fg, pr => 'info', fm => np($cfg) }) if $verbose > 2;
+logg({ fg => $fg, pr => 'info', fm => "%s v.%s is starting ...", ls => [ $PROGNAM, $PROGVER ] });
+logg({ fg => $fg, pr => 'info', fm => np($cfg) }) if $v > 2;
 
-cfg_validate($cfg);
+our @svc = cfg_validate($cfg);
 
-if ( ! $fg ) {
-  daemonize();
-}
+daemonize() if ! $fg;
 
 my $req = Net::LDAP::Control::SyncRequest->new( mode     => LDAP_SYNC_REFRESH_AND_PERSIST,
 						critical => 1,
 						cookie   => undef, );
 
 our $s;
-my ( $ldap, $mesg, $tmp );
-
+my $tmp;
 my $cfgattrs = [];
-our @s_arr;
-@s_arr = grep { $_ if $cfg->{services}->{$_} eq 'yes' } keys(%{$cfg->{services}});
 
-foreach $s ( @s_arr ) {
-  $cfgattrs = [ @{$cfgattrs},
-		values(%{$cfg->{$s . '_map_s'}}),
-		values(%{$cfg->{$s . '_map_m'}}), ];
-}
+$cfgattrs = [ @{$cfgattrs}, values(%{$cfg->{$_ . '_map_s'}}), values(%{$cfg->{$_ . '_map_m'}}), ]
+  foreach ( @svc );
+
 my @sysattrs = qw( authorizedService
+		   description
 		   entryUUID
 		   entryCSN
 		   createTimestamp
@@ -147,7 +144,7 @@ $cfgattrs = [ @{$tmp}, @sysattrs, ];
 
 while ( 1 ) {
 
-  $ldap = Net::LDAP->new( $cfg->{_}->{host},
+  my $ldap = Net::LDAP->new( $cfg->{_}->{host},
 			  # async => 1,
 			  debug => $ldap_debug // $cfg->{_}->{ldap_debug} // 0,
 			);
@@ -157,9 +154,9 @@ while ( 1 ) {
 		 $cfg->{_}->{scope},
 		 $cfg->{_}->{filter},
 		 join("\n", @{$cfgattrs}) ] })
-    if $verbose > 2;
+    if $v > 2;
 
-  $mesg = $ldap->search( base     => $cfg->{_}->{base},
+  my $mesg = $ldap->search( base     => $cfg->{_}->{base},
 			 scope    => $cfg->{_}->{scope},
 			 control  => [ $req ],
 			 callback => \&ldap_search_callback,
@@ -169,10 +166,8 @@ while ( 1 ) {
   if ( $mesg->code ) {
     logg({ fg => $fg, pr => 'info',
 	   fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
-	   ls => [ $mesg->{error_name},
-		   $mesg->{error_text},
-		   $mesg->{mesg_id},
-		   $mesg->dn ] });
+	   ls => [ $mesg->{error_name}, $mesg->{error_text},
+		   $mesg->{mesg_id},    $mesg->dn ] });
   }
 }
 
@@ -187,12 +182,9 @@ exit 0;
 sub cfg_validate {
   my $cfg = shift;
   my $cfg_item;
-
   my @svc;
   if ( exists $cfg->{services} ) {
-    foreach (sort (keys (%{$cfg->{services}}))) {
-      push @svc, $_ if $cfg->{services}->{$_} eq 'yes';
-    }
+    @svc = sort grep { $_ if $cfg->{services}->{$_} eq 'yes' } keys(%{$cfg->{services}});
   } else {
     print "cfg_validate(): services is a mandatory section, you must provide at least one\n\n";
     exit 2;
@@ -202,6 +194,9 @@ sub cfg_validate {
     if ( ! -d $cfg->{$_}->{out_path} ) {
       print "cfg_validate(): service $_ out_path: $cfg->{$_}->{out_path} does not exist\n\n";
       exit 2;
+    } elsif ( ! -w $cfg->{$_}->{out_path} ) {
+      print "cfg_validate(): service $_ out_path: $cfg->{$_}->{out_path}: Permission denied\n\n";
+      exit 2;
     }
   }
 
@@ -210,7 +205,7 @@ sub cfg_validate {
     if ( defined $cfg_item ) {
       logg({ fg => $fg, pr => 'info',
 	     fm => "setuid user %s(%s) confirmed", ls => [ $cfg->{_}->{uid}, $cfg_item ] })
-	if $verbose > 1;
+	if $v > 1;
       $cfg->{_}->{uid_number} = $cfg_item;
     } else {
       print "cfg_validate(): No user $cfg->{_}->{uid} exist\n\n";
@@ -222,13 +217,14 @@ sub cfg_validate {
     if ( defined $cfg_item ) {
       logg({ fg => $fg, pr => 'info',
 	     fm => "setgid group %s(%s) confirmed", ls => [ $cfg->{_}->{gid}, $cfg_item ] })
-	if $verbose > 1;
+	if $v > 1;
       $cfg->{_}->{gid_number} = $cfg_item;
     } else {
       print "cfg_validate(): No group $cfg->{_}->{gid} exist\n\n";
       return 1;
     }
   }
+  return @svc;
 }
 
 =head2 daemonize
@@ -240,13 +236,15 @@ do daemonization of ourselves
 sub daemonize {
   my ( $pid, $fh, $pp, $orphaned_pid_mtime );
   if ( -e $cfg->{_}->{pid_file} ) {
-    try {
-      open( $fh, "<", $cfg->{_}->{pid_file});
-      $pid = <$fh>;
-    } catch {
+    open( $fh, "<", $cfg->{_}->{pid_file}) || do {
       die "Can't open $cfg->{_}->{pid_file} for reading: $!";
+      exit 1;
     };
-    try { close($fh); } catch { die "close $cfg->{_}->{pid_file} (opened for reading) failed: $!"; };
+    $pid = <$fh>;
+    close($fh) || do {
+      print "close $cfg->{_}->{pid_file} (opened for reading) failed: $!\n\n";
+      exit 1;
+    };
 
     if ( kill(0, $pid) ) {
       print "Doing nothing\npidfile $cfg->{_}->{pid_file} of the proces with pid $pid, exists and the very process is alive\n\n";
@@ -257,7 +255,7 @@ sub daemonize {
     if ( unlink $cfg->{_}->{pid_file} ) {
       logg({ fg => $fg, pr => 'debug', fm => "orphaned %s was removed",
 	     ls => [ $cfg->{_}->{pid_file} ] })
-	if $verbose > 0;
+	if $v > 0;
     } else {
       logg({ fg => $fg, pr => 'err', fm => "orphaned %s (mtime: %s) was not removed: %s",
 	     ls => [ $cfg->{_}->{pid_file}, $orphaned_pid_mtime, $! ] });
@@ -267,18 +265,23 @@ sub daemonize {
     undef $pid;
   }
 
-  try { $pid = fork(); } catch { die "fork went wrong: $!"; };
+  $pid = fork();
+  die "fork went wrong: $!\n\n" unless defined $pid;
   exit(0) if $pid != 0;
 
-  setsid || die "setsid went wrong: $!";
+  setsid || do { print "setsid went wrong: $!\n\n"; exit 1; };
 
-  try { open( $pp, ">", $cfg->{_}->{pid_file}); } catch { die "Can't open $cfg->{_}->{pid_file} for writing: $!"; };
+  open( $pp, ">", $cfg->{_}->{pid_file}) || do {
+    print "Can't open $cfg->{_}->{pid_file} for writing: $!"; exit 1; };
   print $pp "$$";
-  try { close( $pp ); } catch { die "close $cfg->{_}->{pid_file} (opened for writing), failed: $!"; };
+  close( $pp ) || do {
+    print "close $cfg->{_}->{pid_file} (opened for writing), failed: $!\n\n"; exit 1; };
 
-  try { open (STDIN,  "</dev/null"); } catch { die "Can't redirect /dev/null to STDIN"; };
-  try { open (STDOUT, ">/dev/null"); } catch { die "Can't redirect to STDOUT to /dev/null"; };
-  try { open (STDERR, ">&STDOUT");   } catch { die "Can't redirect STDERR to STDOUT"; };
+  if ( $v > 1 ) {
+    open (STDIN,  "</dev/null") || do { print "Can't redirect /dev/null to STDIN\n\n"; exit 1; };
+    open (STDOUT, ">/dev/null") || do { print "Can't redirect STDOUT to /dev/null\n\n"; exit 1; };
+    open (STDERR, ">&STDOUT")   || do { print "Can't redirect STDERR to STDOUT\n\n"; exit 1; };
+  }
 
   $SIG{HUP}  = sub { logg({ fg => $fg, pr => 'warning', fm => "HUP SIG received" });
 		     exec('perl', @DAEMONARGS); };
@@ -287,10 +290,11 @@ sub daemonize {
 		     exit 0;};
 
   if ( exists $cfg->{_}->{uid} && exists $cfg->{_}->{gid} ) {
-    try { setgid ( $cfg->{_}->{gid_number} ) } catch { die "setgid went wrong: $!"};
-    try { setuid ( $cfg->{_}->{uid_number} ) } catch { die "setuid went wrong: $!"};
+    setgid ( $cfg->{_}->{gid_number} ) || do { print "setgid went wrong: $!\n\n"; exit 1; };
+    setuid ( $cfg->{_}->{uid_number} ) || do { print "setuid went wrong: $!\n\n"; exit 1; };
   }
 
+  logg({ fg => $fg, pr => 'info', fm => "%s v.%s is started.", ls => [ $PROGNAM, $PROGVER ] });
 }
 
 =head2 logg
@@ -327,13 +331,12 @@ sub ldap_search_callback {
   my ( $msg, $obj ) = @_;
   my @controls = $msg->control;
   my $syncstate = scalar @controls ? $controls[0] : undef;
-  my $st;
-  my ( $tt, $tt_vars, $map, $out_file_pfx, $out_file, $tmp_debug_msg, $rdn);
+  my ( $s, $st, $tt_vars, $map, $out_file_pfx, $out_file, $tmp_debug_msg, $rdn);
 
   logg({ fg => $fg, pr => 'debug', fm => "syncstate: %s", ls => [ np( $syncstate ) ] })
-    if $verbose > 3;
+    if $v > 4;
   logg({ fg => $fg, pr => 'debug', fm => "object: %s", ls => [ np( $obj ) ] })
-    if $verbose > 3;
+    if $v > 4;
 
   if ( defined $obj && $obj->isa('Net::LDAP::Entry') ) {
 
@@ -342,16 +345,18 @@ sub ldap_search_callback {
     if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
       $st = $syncstate->state;
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
-	foreach $s ( @s_arr ) {
+	foreach $s ( @svc ) {
 	  logg({ fg => $fg, pr => 'debug',
-		 fm => sprintf("WHICH SERVICE: %s; ctrl_attr %s: %s;DN: %s",
-			       $s, $cfg->{$s}->{ctrl_attr},
-			       $obj->exists($cfg->{$s}->{ctrl_attr}), $obj->dn) })
-	    if $verbose > 2;
+		 fm => sprintf("SERVICE: % 8s; ctrl_attr % 36s: % 6s; DN: %s",
+			       $s,
+			       $cfg->{$s}->{ctrl_attr},
+			       $obj->exists($cfg->{$s}->{ctrl_attr}) ? 'TRUE' : 'FALSE',
+			       $obj->dn) })
+	    if $v > 2;
+
 	  next if ! $obj->exists($cfg->{$s}->{ctrl_attr});
 
-	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn ] })
-	    if $verbose > 1;
+	  logg({ fg => $fg, pr => 'debug', fm => "%s: DN: %s", ls => [ SYNST->[$st], $obj->dn ] });
 
 	  if ( exists $cfg->{$s}->{out_file_pfx} && exists $cfg->{$s}->{out_file} ) {
 	    $out_file_pfx = $obj->get_value($cfg->{$s}->{out_file_pfx});
@@ -370,9 +375,9 @@ sub ldap_search_callback {
 	    $out_file = sprintf("%s%s", $obj->get_value($rdn), $cfg->{$s}->{out_ext} // '');
 	  }
 
-	  logg({ fg => $fg, pr => 'debug',
-		 fm => "TT OUTPUT FILE name: " . $out_file })
-	    if $verbose > 2;
+	  logg({ fg => $fg, pr => 'debug', fm => "TT OUTPUT to: %s/%s",
+		 ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $out_file ] })
+	    if $v > 2;
 
 	  #
 	  ## collecting all mapped attributes values
@@ -390,55 +395,65 @@ sub ldap_search_callback {
 	    }
 	  }
 
+	  $tt_vars->{prog}       = sprintf("%s v.%s", $PROGNAM, $PROGVER);
 	  $tt_vars->{DN}         = $obj->dn;
 	  $tt_vars->{date}       = strftime( $ts_fmt, localtime(time));
+	  $tt_vars->{descr}      = $obj->get_value('description')
+	    if $obj->exists('description');
 	  $tt_vars->{server}     = ( split(/\@/, $obj->get_value('authorizedService')) )[1]
 	    if $obj->exists('authorizedService');
 	  $tt_vars->{createdby}  =
 	    ( split(/=/, ( split(/,/, $obj->get_value('creatorsName')) )[0]) )[1];
 	  $tt_vars->{modifiedby} =
 	    ( split(/=/, ( split(/,/, $obj->get_value('modifiersName')) )[0]) )[1];
+
+	  ## picking root object RDN
 	  foreach ( reverse split(/,/, $obj->dn) ) {
 	    next if $_ !~ /^uid=/;
 	    $tt_vars->{uid} = ( split(/=/, $_) )[1];
 	    last;
 	  }
 
-	  my ( $tmp_fh, $tmp_fn);
-	  try {
-	    $tmp_fh = File::Temp->new( UNLINK => 0,
-				       DIR => $out_file_pfx // $cfg->{$s}->{out_path} );
-	    $tmp_fn = $tmp_fh->filename;
-	    # my $seclevel = File::Temp->safe_level( File::Temp::HIGH );
-	    # if ( $seclevel != File::Temp::HIGH ) {
-	    #   print "Could not change to high security level...\n\n";
-	    #   exit 2;
-	    # }
-	  } catch {
-	    logg({ fg => $fg, pr => 'err', fm => "File::Temp->new( DIR => %s ) for service %s error: %s",
-		   ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $s, $! ] });
+	  my ( $tmp_fh, $tmp_fn );
+	  eval {
+	    $tmp_fh =
+	      File::Temp->new( UNLINK => 0,
+			       DIR    => $out_file_pfx // $cfg->{$s}->{out_path} );
 	  };
+	  if ( $@ ) {
+	    logg({ fg => $fg, pr => 'err',
+		   fm => "File::Temp->new( DIR => \"%s\" ) for service \"%s\" error: \"%s\"; we skip this service iteration...",
+		   ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $s, $@ ] });
+	    next;
+	  }
 
-	  $tt = Template->new( TRIM        => 1,
-			       ABSOLUTE    => 1,
-			       RELATIVE    => 1,
-			       OUTPUT_PATH => $out_file_pfx // $cfg->{$s}->{out_path},
-			       DEBUG       => $fg // $cfg->{_}->{tt_debug}, );
+	  $tmp_fn = $tmp_fh->filename;
 
-	  try {
-	    $tt->process( sprintf("%s/%s",
-				  $cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}), $tt_vars, $tmp_fh );
-	  } catch {
-	    logg({ fg => $fg, pr => 'err', fm => "%s .tt process error: %s",
-		   ls => [ SYNST->[$st], $tt->error] });
-	  };
+	  my $tt = Template->new( TRIM        => 1,
+				  ABSOLUTE    => 1,
+				  RELATIVE    => 1,
+				  OUTPUT_PATH => $out_file_pfx // $cfg->{$s}->{out_path},
+				  DEBUG       => $fg // $cfg->{_}->{tt_debug}, );
 
-	  try {
-	    close( $tmp_fh );
-	  } catch {
+	  logg({ fg => $fg, pr => 'err',
+		 fm => "Template->new( OUTPUT_PATH => %s ) for service %s error: %s",
+		 ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $s, $! ] })
+	    if ! defined $tt;
+
+	  $tt->process( sprintf("%s/%s",
+				$cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}), $tt_vars, $tmp_fh ) ||
+				  do {
+				    logg({ fg => $fg, pr => 'err',
+					   fm => "%s .tt process error: %s",
+					   ls => [ SYNST->[$st], $tt->error] });
+				    next;
+				  };
+
+	  close( $tmp_fh ) || do {
 	    logg({ fg => $fg, pr => 'err',
 		   fm => "close file (opened for writing), service %s, failed: %s",
 		   ls => [ $s, $! ] });
+	    next;
 	  };
 
 	  if ( -d $cfg->{$s}->{out_path} ) {
@@ -455,21 +470,35 @@ sub ldap_search_callback {
 		   ls => [ $tmp_fn, $out_file ] });
 
 	  if ( -e $out_file ) {
-	    chmod oct($cfg->{$s}->{chmod}), $out_file ||
-	      logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed",
-		     ls => [ $out_file ] });
+	    if ( exists $cfg->{$s}->{chmod} ) {
+	      chmod oct($cfg->{$s}->{chmod}), $out_file ||
+		logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed",
+		       ls => [ $out_file ] });
+	    } elsif ( exists $cfg->{_}->{chmod} ) {
+	      chmod oct($cfg->{_}->{chmod}), $out_file ||
+		logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed",
+		       ls => [ $out_file ] });
+	    }
+
+	    if ( exists $cfg->{$s}->{chown} ) {
+	      chown $obj->get_value('uidNumber'), $obj->get_value('gidNumber'), $out_file ||
+		logg({ fg => $fg, pr => 'err', fm => "chown ($s:$s) %s failed",
+		       ls => [ $obj->get_value('uidNumber'),
+			       $obj->get_value('gidNumber'),
+			       $out_file ] });
+	    }
 	  } else {
-	    logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed, no such file",
+	    logg({ fg => $fg, pr => 'err', fm => "%s disappeared, no such file any more...",
 		   ls => [ $out_file ] });
 	  }
 	}
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn] })
-	    if $verbose > 1;
+	    if $v > 1;
 	  if ( unlink $cfg->{$s}->{out_path} . '/' . $out_file ) {
 	    logg({ fg => $fg, pr => 'debug', fm => "file %s was successfully removed",
 		 ls => [ $cfg->{$s}->{out_path} . '/' . $out_file ] })
-	      if $verbose > 0;
+	      if $v > 0;
 	  } else {
 	    logg({ fg => $fg, pr => 'err',
 		   fm => "file %s was not removed",
@@ -477,10 +506,10 @@ sub ldap_search_callback {
 	  }
 	}
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
-      logg({ fg => $fg, pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $verbose > 1;
+      logg({ fg => $fg, pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $v > 1;
     } elsif ( ! defined $syncstate ) {
       logg({ fg => $fg, pr => 'warning',
-	     fm => "LDAP entry without Sync State control" }) if $verbose > 1;
+	     fm => "LDAP entry without Sync State control" }) if $v > 1;
     }
 
     $req->cookie($syncstate->cookie) if $syncstate->cookie;
@@ -513,16 +542,12 @@ sub opensslize {
   my $chst = $? >> 8;
   if ( $chst ) {
     logg({ fg => $fg, pr => 'err',
-	   fm => "opensslize() error!" }) if $verbose > 1;
+	   fm => "opensslize() error!" }) if $v > 1;
   };
   
   $arg->{res} .= $_ while ( <$chou> );
   
   return $arg->{res};
-}
-
-sub get_mtime {
-  return strftime("%F %T %Z (%z)", localtime( (stat( shift ))[9] ));
 }
 
 =head1 USAGE
