@@ -66,7 +66,6 @@ use Config::Tiny;
 use Data::Printer caller_info => 1, class => { expand => 2 };
 use List::Util qw( uniqstr );
 use IPC::Open2;
-use Try::Tiny;
 use File::Temp;
 use File::Basename;
 
@@ -74,10 +73,11 @@ use Net::LDAP;
 use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_SYNC_REFRESH_AND_PERSIST
 			    LDAP_SUCCESS
-			    LDAP_SYNC_PRESENT 
+			    LDAP_SYNC_PRESENT
 			    LDAP_SYNC_ADD
 			    LDAP_SYNC_MODIFY
 			    LDAP_SYNC_DELETE
+			    LDAP_CONNECT_ERROR
 			    LDAP_OPERATIONS_ERROR
 			    LDAP_LOCAL_ERROR
 			 );
@@ -97,6 +97,8 @@ my $colors  = 0;
 our $v       = 0;
 my $config  = '/usr/local/etc/regather.conf';
 my $ldap_debug;
+my $binddn;
+my $bindpw;
 
 openlog($PROGNAM, "ndelay,pid");
 
@@ -106,14 +108,80 @@ my $get_opt_res =
 	     'c|config=s'   => \$config,
 	     'colors'       => \$colors,
 	     'ldap-debug=i' => \$ldap_debug,
+	     'binddn=s'     => \$binddn,
+	     'bindpw=s'     => \$bindpw,
 	     'v+'           => \$v,
 	     'h|help'       => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
 	    );
 
-my $cfg = Config::Tiny->read( $config );
+our $cfg = Config::Tiny->read( $config );
 pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]) if ! defined $cfg;
 
 logg({ fg => $fg, pr => 'info', fm => "%s v.%s is starting ...", ls => [ $PROGNAM, $PROGVER ] });
+
+$cfg->{ldap_config} = { 'uri' => 'ldap://127.0.0.1', };
+
+my @ldap_config_files = qw( /usr/local/etc/openldap/ldap.conf
+			    /etc/ldap.conf
+			    /etc/ldap/ldap.conf
+			    /etc/openldap/ldap.conf );
+
+unshift @ldap_config_files, $ENV{LDAP_CONF} if defined($ENV{LDAP_CONF});
+
+foreach (@ldap_config_files) {
+  if ( -e $_ ) {
+    read_ldap_config_file( $_ );
+    last;
+  }
+}
+
+$cfg->{ldap_config}->{binddn} = $binddn if defined $binddn;
+$cfg->{ldap_config}->{bindpw} = $bindpw if defined $bindpw;
+logg({ fg => $fg, pr => 'info', fm => "binddn/pw are provided from CLI" }) if $v > 1;
+
+my @start_tls_options;
+if ( exists $cfg->{ldap_config}->{ssl} &&
+     $cfg->{ldap_config}->{ssl} eq 'start_tls') {
+
+  push @start_tls_options, capath => $cfg->{ldap_config}->{tls_cacertdir}
+    if ( exists $cfg->{ldap_config}->{tls_cacertdir} );
+  push @start_tls_options, cafile => $cfg->{ldap_config}->{tls_cacert}
+    if ( exists $cfg->{ldap_config}->{tls_cacert} );
+  
+  if ( exists $cfg->{ldap_config}->{tls_reqcert} &&
+       $cfg->{ldap_config}->{tls_reqcert} eq 'none') {
+    push @start_tls_options, verify => 'never';
+  } elsif ( exists $cfg->{ldap_config}->{tls_reqcert} &&
+	    $cfg->{ldap_config}->{tls_reqcert} eq 'allow') {
+    push @start_tls_options, verify => 'optional';
+  } elsif ( exists $cfg->{ldap_config}->{tls_reqcert} &&
+	    $cfg->{ldap_config}->{tls_reqcert} eq 'demand'
+	   or $cfg->{ldap_config}->{tls_reqcert} eq 'hard') {
+    push @start_tls_options, verify => 'require';
+  } elsif ( exists $cfg->{ldap_config}->{tls_reqcert} &&
+	    $cfg->{ldap_config}->{tls_reqcert} eq 'try') {
+    push @start_tls_options, verify => 'optional'; # FIXME: That's wrong
+  }
+  push @start_tls_options, clientcert => $cfg->{ldap_config}->{tls_cert}
+    if exists $cfg->{ldap_config}->{tls_cert};
+  push @start_tls_options, clientkey => $cfg->{ldap_config}->{tls_key}
+    if exists $cfg->{ldap_config}->{tls_key};
+  push @start_tls_options, ciphers => $cfg->{ldap_config}->{tls_cipher_suite}
+    if exists $cfg->{ldap_config}->{tls_cipher_suite};
+
+  logg({ fg => $fg, pr => 'info', fm => "LDAP strt_tls options:\n %s",
+	 ls => [ np(@start_tls_options) ] })
+    if $v > 2;
+}
+
+my @bind_options;
+if ( exists $cfg->{ldap_config}->{binddn} ) {
+  push @bind_options, $cfg->{ldap_config}->{binddn};
+  push @bind_options, password => $cfg->{ldap_config}->{bindpw}
+    if exists $cfg->{ldap_config}->{bindpw};
+}
+
+
 logg({ fg => $fg, pr => 'info', fm => np($cfg) }) if $v > 2;
 
 our @svc = cfg_validate($cfg);
@@ -127,6 +195,8 @@ my $req = Net::LDAP::Control::SyncRequest->new( mode     => LDAP_SYNC_REFRESH_AN
 our $s;
 my $tmp;
 my $cfgattrs = [];
+my $ldap;
+my $mesg;
 
 $cfgattrs = [ @{$cfgattrs}, values(%{$cfg->{$_ . '_map_s'}}), values(%{$cfg->{$_ . '_map_m'}}), ]
   foreach ( @svc );
@@ -142,21 +212,40 @@ my @sysattrs = qw( authorizedService
 @{$tmp}   = uniqstr @{$cfgattrs};
 $cfgattrs = [ @{$tmp}, @sysattrs, ];
 
+#
+## MAIN LOOP
+#
 while ( 1 ) {
+    $ldap = Net::LDAP->new( $cfg->{ldap_config}->{uri},
+			    version => 3,
+			    debug   => $ldap_debug // $cfg->{_}->{ldap_debug} // 0, )
+      || do {
+	print "\nUnable to connect to $cfg->{ldap_config}->{'uri'}: $!\n\n";
+	exit LDAP_CONNECT_ERROR;
+      };
 
-  my $ldap = Net::LDAP->new( $cfg->{_}->{host},
-			  # async => 1,
-			  debug => $ldap_debug // $cfg->{_}->{ldap_debug} // 0,
-			);
-  logg({ fg => $fg, pr => 'info',
-	 fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
-	 ls => [ $cfg->{_}->{base},
-		 $cfg->{_}->{scope},
-		 $cfg->{_}->{filter},
-		 join("\n", @{$cfgattrs}) ] })
-    if $v > 2;
+  if ( @start_tls_options ) {
+    eval {
+      $mesg = $ldap->start_tls( @start_tls_options );
+    };
+    if ( $@ ) {
+      logg({ fg => $fg, pr => 'err', fm => "TLS negotiation failed: %s",
+	     ls => [ $! ] });
+      exit LDAP_CONNECT_ERROR;
+    } else {
+      logg({ fg => $fg, pr => 'info', fm => "TLS negotiation succeeded" }) if $v > 1;
+    }
+  }
 
-  my $mesg = $ldap->search( base     => $cfg->{_}->{base},
+  if ( @bind_options ) {
+    $mesg = $ldap->bind( @bind_options );
+    if ( $mesg->code ) {
+      logg({ fg => $fg, pr => 'err', fm => "bind error: %s", ls => [ $mesg->error ] });
+      exit $mesg->code;
+    }
+  }
+
+  $mesg = $ldap->search( base     => $cfg->{_}->{base},
 			 scope    => $cfg->{_}->{scope},
 			 control  => [ $req ],
 			 callback => \&ldap_search_callback,
@@ -164,10 +253,14 @@ while ( 1 ) {
 			 attrs    => $cfgattrs,
 		       );
   if ( $mesg->code ) {
-    logg({ fg => $fg, pr => 'info',
-	   fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
-	   ls => [ $mesg->{error_name}, $mesg->{error_text},
-		   $mesg->{mesg_id},    $mesg->dn ] });
+    logg({ fg => $fg, pr => 'err',
+	   fm => "LDAP search error: DN: %s; error: %s",
+	   ls => [ $mesg->dn, $mesg->error ] });
+    exit $mesg->code;
+  } else {
+    logg({ fg => $fg, pr => 'info', fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
+	   ls => [ $cfg->{_}->{base}, $cfg->{_}->{scope}, $cfg->{_}->{filter},
+		   join("\n", @{$cfgattrs}) ] }) if $v > 2;
   }
 }
 
@@ -550,6 +643,28 @@ sub opensslize {
   return $arg->{res};
 }
 
+sub read_ldap_config_file {
+    my $config_file = shift;
+    my $file;
+    my $line = 0;
+
+    open($file, "<", $config_file) || do {
+      die "cannot open $config_file: $!";
+      exit 1;
+    };
+    while (<$file>) {
+	++$line;
+	chomp;
+	s/^\s+//;
+	s/\s+$//;
+        s/#.*//;
+	next if ($_ eq "");
+	my @kwp = split(/\s+/, $_, 2);
+	$cfg->{ldap_config}->{lc($kwp[0])} = $kwp[1];
+    }
+    close($file);
+}
+
 =head1 USAGE
 
 regather <-c regather.conf> [ all other options ]
@@ -560,6 +675,11 @@ regather <-c regather.conf> [ all other options ]
 
     /usr/local/etc/regather.d/*.tt templates to generate files from
     /usr/local/etc/regather.conf   config file
+
+    /usr/local/etc/openldap/ldap.conf
+    /etc/ldap.conf
+    /etc/ldap/ldap.conf
+    /etc/openldap/ldap.conf
 
 =head1 CONFIG FILE
 

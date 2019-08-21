@@ -21,14 +21,22 @@
 #  modified: by [% modifiedby %], on [% modifiedon %]
 #
 
-[% IF state == 'enabled' %]# [% END %]disable
+[% IF state == 'enabled' -%]# [% END -%]disable
 
 ifconfig-push [% ifconfigpush %]
-[% FOREACH item IN iroute %][% IF item != 'NA' %]
-iroute [% item %][% END %][% END %]
 
-[% FOREACH item IN push %][% IF item != 'NA' %]
-push "[% item %]"[% END %][% END %]
-
-[% IF config && config != 'NA' %]config [% config %][% END %]
+[% IF iroute -%]
+[% FOREACH item IN iroute -%]
+[% IF item != 'NA' -%]iroute [% item %][% END -%]
+[% END -%]
+[% END -%]
+[% IF push -%]
+[% FOREACH item IN push -%]
+[% IF item != 'NA' -%]push "[% item %]"
+[% END -%]
+[% END -%]
+[% END -%]
+[% IF config && config != 'NA' -%]
+config [% config %]
+[% END -%]
 
