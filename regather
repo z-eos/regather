@@ -62,12 +62,12 @@ use POSIX;
 use Template;
 use Sys::Syslog qw(:standard :macros);
 use Getopt::Long;
-use Config::Tiny;
-use Data::Printer caller_info => 1, class => { expand => 2 };
 use List::Util qw( uniqstr );
 use IPC::Open2;
 use File::Temp;
 use File::Basename;
+use Regather::Config;
+use Regather::Logg;
 
 use Net::LDAP;
 use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
@@ -90,17 +90,17 @@ my $ts_fmt = "%a %F %T %Z (%z)";
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-my $PROGVER    = '0.5';
+my $VERSION    = '0.5';
 
-my $fg      = 0;
-my $colors  = 0;
-our $v       = 0;
-my $config  = '/usr/local/etc/regather.conf';
+our $v     = 0;
+our $fg    = 0;
+my $colors = 0;
+my $config = '/usr/local/etc/regather.conf';
 my $ldap_debug;
 my $binddn;
 my $bindpw;
-
-openlog($PROGNAM, "ndelay,pid");
+my $host;
+my $base;
 
 Getopt::Long::Configure("no_ignore_case");
 my $get_opt_res =
@@ -108,83 +108,85 @@ my $get_opt_res =
 	     'c|config=s'   => \$config,
 	     'colors'       => \$colors,
 	     'ldap-debug=i' => \$ldap_debug,
+	     'H|host=s'     => \$host,
+	     'B|base=s'     => \$base,
 	     'binddn=s'     => \$binddn,
 	     'bindpw=s'     => \$bindpw,
 	     'v+'           => \$v,
 	     'h|help'       => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
 	    );
 
-our $cfg = Config::Tiny->read( $config );
-pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]) if ! defined $cfg;
+my $log = new Regather::Logg( prognam    => $PROGNAM,
+			      foreground => $fg,
+			      colors     => $colors );
+$log->logg({ pr => 'info', fm => "Regather::Logg initialized ..." }) if $v > 1;
 
-logg({ fg => $fg, pr => 'info', fm => "%s v.%s is starting ...", ls => [ $PROGNAM, $PROGVER ] });
+my $ldap_opts;
+$ldap_opts->{uri}    = $host   if defined $host;
+$ldap_opts->{base}   = $base   if defined $base;
+$ldap_opts->{binddn} = $binddn if defined $binddn;
+$ldap_opts->{bindpw} = $bindpw if defined $bindpw;
+$log->logg({ pr => 'info', fm => "ldap options provided from CLI:\n%s", ls => [ $ldap_opts ] })
+  if keys( %{$ldap_opts} ) && $v > 1;
 
-$cfg->{ldap_config} = { 'uri' => 'ldap://127.0.0.1', };
+my $cf = new Regather::Config ( filename  => $config,
+			        logger    => $log,
+			        add_nodes => { ldap => $ldap_opts },
+				verbose   => $v );
 
-my @ldap_config_files = qw( /usr/local/etc/openldap/ldap.conf
-			    /etc/ldap.conf
-			    /etc/ldap/ldap.conf
-			    /etc/openldap/ldap.conf );
-
-unshift @ldap_config_files, $ENV{LDAP_CONF} if defined($ENV{LDAP_CONF});
-
-foreach (@ldap_config_files) {
-  if ( -e $_ ) {
-    read_ldap_config_file( $_ );
-    last;
-  }
+if ( ! defined $cf ) {
+  $log->logg({ fg => $fg, pr => 'err', fm => "do fix config file ..." });
+  pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
+  exit 1;
 }
 
-$cfg->{ldap_config}->{binddn} = $binddn if defined $binddn;
-$cfg->{ldap_config}->{bindpw} = $bindpw if defined $bindpw;
-logg({ fg => $fg, pr => 'info', fm => "binddn/pw are provided from CLI" }) if $v > 1;
+$log->set_m( $cf->getnode('log')->as_hash );
 
 my @start_tls_options;
-if ( exists $cfg->{ldap_config}->{ssl} &&
-     $cfg->{ldap_config}->{ssl} eq 'start_tls') {
+if ( $cf->is_set(qw(ldap ssl)) && $cf->get(qw(ldap ssl)) eq 'start_tls') {
 
-  push @start_tls_options, capath => $cfg->{ldap_config}->{tls_cacertdir}
-    if ( exists $cfg->{ldap_config}->{tls_cacertdir} );
-  push @start_tls_options, cafile => $cfg->{ldap_config}->{tls_cacert}
-    if ( exists $cfg->{ldap_config}->{tls_cacert} );
-  
-  if ( exists $cfg->{ldap_config}->{tls_reqcert} &&
-       $cfg->{ldap_config}->{tls_reqcert} eq 'none') {
+  push @start_tls_options,
+    capath => $cf->get(qw(ldap tls_cacertdir)) if $cf->is_set(qw(ldap tls_cacertdir));
+  push @start_tls_options,
+    cafile => $cf->get(qw(ldap tls_cacert))    if $cf->is_set(qw(ldap tls_cacert));
+
+  if ( $cf->is_set(qw(ldap tls_reqcert)) &&
+       $cf->get(qw(ldap tls_reqcert)) eq 'none') {
     push @start_tls_options, verify => 'never';
-  } elsif ( exists $cfg->{ldap_config}->{tls_reqcert} &&
-	    $cfg->{ldap_config}->{tls_reqcert} eq 'allow') {
+  } elsif ( $cf->is_set(qw(ldap tls_reqcert)) &&
+	    $cf->get(qw(ldap tls_reqcert)) eq 'allow') {
     push @start_tls_options, verify => 'optional';
-  } elsif ( exists $cfg->{ldap_config}->{tls_reqcert} &&
-	    $cfg->{ldap_config}->{tls_reqcert} eq 'demand'
-	   or $cfg->{ldap_config}->{tls_reqcert} eq 'hard') {
+  } elsif ( $cf->is_set(qw(ldap tls_reqcert)) &&
+	    $cf->get(qw(ldap tls_reqcert)) eq 'demand'
+	   or $cf->get(qw(ldap tls_reqcert)) eq 'hard') {
     push @start_tls_options, verify => 'require';
-  } elsif ( exists $cfg->{ldap_config}->{tls_reqcert} &&
-	    $cfg->{ldap_config}->{tls_reqcert} eq 'try') {
+  } elsif ( $cf->is_set(qw(ldap tls_reqcert)) &&
+	    $cf->get(qw(ldap tls_reqcert)) eq 'try') {
     push @start_tls_options, verify => 'optional'; # FIXME: That's wrong
   }
-  push @start_tls_options, clientcert => $cfg->{ldap_config}->{tls_cert}
-    if exists $cfg->{ldap_config}->{tls_cert};
-  push @start_tls_options, clientkey => $cfg->{ldap_config}->{tls_key}
-    if exists $cfg->{ldap_config}->{tls_key};
-  push @start_tls_options, ciphers => $cfg->{ldap_config}->{tls_cipher_suite}
-    if exists $cfg->{ldap_config}->{tls_cipher_suite};
+  push @start_tls_options,
+    clientcert => $cf->get(qw(ldap tls_cert))      if $cf->is_set(qw(ldap tls_cert));
+  push @start_tls_options,
+    clientkey => $cf->get(qw(ldap tls_key))        if $cf->is_set(qw(ldap tls_key));
+  push @start_tls_options,
+    ciphers => $cf->get(qw(ldap tls_cipher_suite)) if $cf->is_set(qw(ldap tls_cipher_suite));
 
-  logg({ fg => $fg, pr => 'info', fm => "LDAP strt_tls options:\n %s",
-	 ls => [ np(@start_tls_options) ] })
-    if $v > 2;
+  $log->logg({ pr => 'info', fm => "LDAP strt_tls options:\n %s",
+	       ls => [ \@start_tls_options ] }) if $v > 2;
 }
 
 my @bind_options;
-if ( exists $cfg->{ldap_config}->{binddn} ) {
-  push @bind_options, $cfg->{ldap_config}->{binddn};
-  push @bind_options, password => $cfg->{ldap_config}->{bindpw}
-    if exists $cfg->{ldap_config}->{bindpw};
+if ( $cf->is_set(qw(ldap binddn)) ) {
+  push @bind_options, $cf->get(qw(ldap binddn));
+  push @bind_options, password => $cf->get(qw(ldap bindpw))
+    if $cf->is_set(qw(ldap bindpw));
 }
 
+$log->logg({ pr => 'info', fm => "Config::Parse object as hash:\n%s",
+	     ls => [ $cf->as_hash ] }) if $v > 2;
+$log->logg({ pr => 'info', fm => "%s v.%s is starting ...", ls => [ $PROGNAM, $VERSION ] });
 
-logg({ fg => $fg, pr => 'info', fm => np($cfg) }) if $v > 2;
-
-our @svc = cfg_validate($cfg);
+our @svc = $cf->names_of('service');
 
 daemonize() if ! $fg;
 
@@ -197,9 +199,25 @@ my $tmp;
 my $cfgattrs = [];
 my $ldap;
 my $mesg;
+my @svc_map;
+my $ww;
 
-$cfgattrs = [ @{$cfgattrs}, values(%{$cfg->{$_ . '_map_s'}}), values(%{$cfg->{$_ . '_map_m'}}), ]
-  foreach ( @svc );
+foreach ( @svc ) {
+  if ( $cf->is_section('service', $_, 'map', 's') ) {
+    @svc_map = values( %{ $cf->getnode('service', $_, 'map', 's')->as_hash } );
+    $cfgattrs = [ @{$cfgattrs}, @svc_map ];
+  } else {
+    @svc_map = ();
+  }
+
+  if ( $cf->is_section('service', $_, 'map', 'm') ) {
+    @svc_map = values( %{ $cf->getnode('service', $_, 'map', 'm')->as_hash } );
+    $cfgattrs = [ @{$cfgattrs}, @svc_map ];
+  } else {
+    @svc_map = ();
+  }
+
+}
 
 my @sysattrs = qw( authorizedService
 		   description
@@ -212,55 +230,68 @@ my @sysattrs = qw( authorizedService
 @{$tmp}   = uniqstr @{$cfgattrs};
 $cfgattrs = [ @{$tmp}, @sysattrs, ];
 
+
 #
-## MAIN LOOP
+## -=== MAIN LOOP =====================================================-
 #
 while ( 1 ) {
-    $ldap = Net::LDAP->new( $cfg->{ldap_config}->{uri},
-			    version => 3,
-			    debug   => $ldap_debug // $cfg->{_}->{ldap_debug} // 0, )
-      || do {
-	print "\nUnable to connect to $cfg->{ldap_config}->{'uri'}: $!\n\n";
-	exit LDAP_CONNECT_ERROR;
-      };
+  $ldap = Net::LDAP->new( $cf->get(qw(ldap uri)),
+			  version => 3,
+			  debug   => $ldap_debug // $cf->get(qw(ldap debug)) // 0, )
+    || do {
+      print "\nUnable to connect to $cf->get(qw(ldap uri)): $!\n\n";
+      exit LDAP_CONNECT_ERROR;
+    };
 
   if ( @start_tls_options ) {
     eval {
       $mesg = $ldap->start_tls( @start_tls_options );
     };
     if ( $@ ) {
-      logg({ fg => $fg, pr => 'err', fm => "TLS negotiation failed: %s",
-	     ls => [ $! ] });
+      $log->logg({ pr => 'err', fm => "TLS negotiation failed: %s",
+		   ls => [ $! ] });
       exit LDAP_CONNECT_ERROR;
     } else {
-      logg({ fg => $fg, pr => 'info', fm => "TLS negotiation succeeded" }) if $v > 1;
+      $log->logg({ pr => 'info', fm => "TLS negotiation succeeded" }) if $v > 1;
     }
   }
 
   if ( @bind_options ) {
     $mesg = $ldap->bind( @bind_options );
     if ( $mesg->code ) {
-      logg({ fg => $fg, pr => 'err', fm => "bind error: %s", ls => [ $mesg->error ] });
+      $log->logg({ pr => 'err', fm => "bind error: %s", ls => [ $mesg->error ] });
       exit $mesg->code;
     }
   }
 
-  $mesg = $ldap->search( base     => $cfg->{_}->{base},
-			 scope    => $cfg->{_}->{scope},
+  $mesg = $ldap->search( base     => $cf->get(qw(ldap base)),
+			 scope    => $cf->get(qw(ldap scope)),
 			 control  => [ $req ],
 			 callback => \&ldap_search_callback,
-			 filter   => $cfg->{_}->{filter},
+			 filter   => $cf->get(qw(ldap filter)),
 			 attrs    => $cfgattrs,
 		       );
   if ( $mesg->code ) {
-    logg({ fg => $fg, pr => 'err',
-	   fm => "LDAP search error: DN: %s; error: %s",
-	   ls => [ $mesg->dn, $mesg->error ] });
+    $log->logg({ pr => 'err',
+		 fm => "LDAP search ERROR...\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		 ls => [
+			 'base: ', $cf->get(qw(ldap base)),
+			 'scope: ',$cf->get(qw(ldap scope)),
+			 'filter: ', $cf->get(qw(ldap filter)),
+			 'attrs: ', join("\n", @{$cfgattrs}),
+
+			 'ERROR: ', $mesg->error_name,
+			 'TEXT: ', $mesg->error_text,
+			 'DESCRIPTION: ', $mesg->error_desc,
+			 'SERVER ERROR: ', $mesg->server_error ] });
     exit $mesg->code;
   } else {
-    logg({ fg => $fg, pr => 'info', fm => "LDAP search: base: %s; scope: %s; filter: %s; attrs: %s",
-	   ls => [ $cfg->{_}->{base}, $cfg->{_}->{scope}, $cfg->{_}->{filter},
-		   join("\n", @{$cfgattrs}) ] }) if $v > 2;
+    $log->logg({ pr => 'info',
+		 fm => "LDAP search:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		 ls => [ 'base: ', $cf->get(qw(ldap base)),
+			 'scope: ',$cf->get(qw(ldap scope)),
+			 'filter: ', $cf->get(qw(ldap filter)),
+			 'attrs: ', join("\n", @{$cfgattrs}) ] }) if $v > 2;
   }
 }
 
@@ -272,54 +303,6 @@ exit 0;
 ## ===================================================================
 #
 
-sub cfg_validate {
-  my $cfg = shift;
-  my $cfg_item;
-  my @svc;
-  if ( exists $cfg->{services} ) {
-    @svc = sort grep { $_ if $cfg->{services}->{$_} eq 'yes' } keys(%{$cfg->{services}});
-  } else {
-    print "cfg_validate(): services is a mandatory section, you must provide at least one\n\n";
-    exit 2;
-  }
-
-  foreach ( @svc ) {
-    if ( ! -d $cfg->{$_}->{out_path} ) {
-      print "cfg_validate(): service $_ out_path: $cfg->{$_}->{out_path} does not exist\n\n";
-      exit 2;
-    } elsif ( ! -w $cfg->{$_}->{out_path} ) {
-      print "cfg_validate(): service $_ out_path: $cfg->{$_}->{out_path}: Permission denied\n\n";
-      exit 2;
-    }
-  }
-
-  if ( exists $cfg->{_}->{uid} ) {
-    $cfg_item = getpwnam( $cfg->{_}->{uid} );
-    if ( defined $cfg_item ) {
-      logg({ fg => $fg, pr => 'info',
-	     fm => "setuid user %s(%s) confirmed", ls => [ $cfg->{_}->{uid}, $cfg_item ] })
-	if $v > 1;
-      $cfg->{_}->{uid_number} = $cfg_item;
-    } else {
-      print "cfg_validate(): No user $cfg->{_}->{uid} exist\n\n";
-      exit 2;
-    }
-  }
-  if ( exists $cfg->{_}->{gid} ) {
-    $cfg_item  = getgrnam( $cfg->{_}->{gid} );
-    if ( defined $cfg_item ) {
-      logg({ fg => $fg, pr => 'info',
-	     fm => "setgid group %s(%s) confirmed", ls => [ $cfg->{_}->{gid}, $cfg_item ] })
-	if $v > 1;
-      $cfg->{_}->{gid_number} = $cfg_item;
-    } else {
-      print "cfg_validate(): No group $cfg->{_}->{gid} exist\n\n";
-      return 1;
-    }
-  }
-  return @svc;
-}
-
 =head2 daemonize
 
 do daemonization of ourselves
@@ -328,30 +311,30 @@ do daemonization of ourselves
 
 sub daemonize {
   my ( $pid, $fh, $pp, $orphaned_pid_mtime );
-  if ( -e $cfg->{_}->{pid_file} ) {
-    open( $fh, "<", $cfg->{_}->{pid_file}) || do {
-      die "Can't open $cfg->{_}->{pid_file} for reading: $!";
+  if ( -e $cf->get(qw(core pid_file)) ) {
+    open( $fh, "<", $cf->get(qw(core pid_file))) || do {
+      die "Can't open $cf->get(qw(core pid_file)) for reading: $!";
       exit 1;
     };
     $pid = <$fh>;
     close($fh) || do {
-      print "close $cfg->{_}->{pid_file} (opened for reading) failed: $!\n\n";
+      print "close $cf->get(qw(core pid_file)) (opened for reading) failed: $!\n\n";
       exit 1;
     };
 
     if ( kill(0, $pid) ) {
-      print "Doing nothing\npidfile $cfg->{_}->{pid_file} of the proces with pid $pid, exists and the very process is alive\n\n";
+      print "Doing nothing\npidfile $cf->get(qw(core pid_file)) of the proces with pid $pid, exists and the very process is alive\n\n";
       exit 1;
     }
 
-    $orphaned_pid_mtime = strftime( $ts_fmt, localtime( (stat( $cfg->{_}->{pid_file} ))[9] ));
-    if ( unlink $cfg->{_}->{pid_file} ) {
-      logg({ fg => $fg, pr => 'debug', fm => "orphaned %s was removed",
-	     ls => [ $cfg->{_}->{pid_file} ] })
+    $orphaned_pid_mtime = strftime( $ts_fmt, localtime( (stat( $cf->get(qw(core pid_file)) ))[9] ));
+    if ( unlink $cf->get(qw(core pid_file)) ) {
+      $log->logg({ pr => 'debug', fm => "orphaned %s was removed",
+	     ls => [ $cf->get(qw(core pid_file)) ] })
 	if $v > 0;
     } else {
-      logg({ fg => $fg, pr => 'err', fm => "orphaned %s (mtime: %s) was not removed: %s",
-	     ls => [ $cfg->{_}->{pid_file}, $orphaned_pid_mtime, $! ] });
+      $log->logg({ pr => 'err', fm => "orphaned %s (mtime: %s) was not removed: %s",
+	     ls => [ $cf->get(qw(core pid_file)), $orphaned_pid_mtime, $! ] });
       exit 2;
     }
 
@@ -364,11 +347,11 @@ sub daemonize {
 
   setsid || do { print "setsid went wrong: $!\n\n"; exit 1; };
 
-  open( $pp, ">", $cfg->{_}->{pid_file}) || do {
-    print "Can't open $cfg->{_}->{pid_file} for writing: $!"; exit 1; };
+  open( $pp, ">", $cf->get(qw(core pid_file))) || do {
+    print "Can't open $cf->get(qw(core pid_file)) for writing: $!"; exit 1; };
   print $pp "$$";
   close( $pp ) || do {
-    print "close $cfg->{_}->{pid_file} (opened for writing), failed: $!\n\n"; exit 1; };
+    print "close $cf->get(qw(core pid_file)) (opened for writing), failed: $!\n\n"; exit 1; };
 
   if ( $v > 1 ) {
     open (STDIN,  "</dev/null") || do { print "Can't redirect /dev/null to STDIN\n\n"; exit 1; };
@@ -376,48 +359,18 @@ sub daemonize {
     open (STDERR, ">&STDOUT")   || do { print "Can't redirect STDERR to STDOUT\n\n"; exit 1; };
   }
 
-  $SIG{HUP}  = sub { logg({ fg => $fg, pr => 'warning', fm => "HUP SIG received" });
+  $SIG{HUP}  = sub { $log->logg({ pr => 'warning', fm => "HUP SIG received" });
 		     exec('perl', @DAEMONARGS); };
-  $SIG{USR1} = sub { logg({ fg => $fg, pr => 'warning', fm => "USR1 SIG received" }) };
-  $SIG{TERM} = sub { logg({ fg => $fg, pr => 'warning', fm => "TERM SIG received" });
+  $SIG{USR1} = sub { $log->logg({ pr => 'warning', fm => "USR1 SIG received" }) };
+  $SIG{TERM} = sub { $log->logg({ pr => 'warning', fm => "TERM SIG received" });
 		     exit 0;};
 
-  if ( exists $cfg->{_}->{uid} && exists $cfg->{_}->{gid} ) {
-    setgid ( $cfg->{_}->{gid_number} ) || do { print "setgid went wrong: $!\n\n"; exit 1; };
-    setuid ( $cfg->{_}->{uid_number} ) || do { print "setuid went wrong: $!\n\n"; exit 1; };
+  if ( $cf->is_set(qw(core uid)) && $cf->is_set(qw(core gid)) ) {
+    setgid ( $cf->get(qw(core gid_number)) ) || do { print "setgid went wrong: $!\n\n"; exit 1; };
+    setuid ( $cf->get(qw(core uid_number)) ) || do { print "setuid went wrong: $!\n\n"; exit 1; };
   }
 
-  logg({ fg => $fg, pr => 'info', fm => "%s v.%s is started.", ls => [ $PROGNAM, $PROGVER ] });
-}
-
-=head2 logg
-
-wrapper to log to syslog or stdin. On input it expects hash
-
-    fg => foreground: stdin or syslog
-    pr => priority: level[|facility]
-    fm => format: sprintf format
-    ls => list of values to be sprintf-ed with format fm
-
-=cut
-
-sub logg {
-  my $args = shift;
-  my $arg = { fg   => $args->{fg} // 0,
-	      pr   => $args->{pr} // 'info',
-	      pr_s => sprintf("%s|%s",
-			      $args->{pr}, $cfg->{_}->{log_facility} // 'CONFIG FILE ERROR'),
-	      pr_f => sprintf("<%s:%s> ",
-			      $cfg->{_}->{log_facility} // 'CONFIG FILE ERROR', $args->{pr}),
-	      fm   => $args->{fm},
-	      ls   => $args->{ls}  // [], };
-
-  if ( $arg->{fg} ) {
-    $arg->{msg} = sprintf $arg->{pr_f} . $arg->{fm}, @{$args->{ls}};
-    p($arg->{msg}, colored => $colors && $fg ? 1 : 0 );
-  } else {
-    syslog( $arg->{pr_s}, $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}} );
-  }
+  $log->logg({ pr => 'info', fm => "%s v.%s is started.", ls => [ $PROGNAM, $VERSION ] });
 }
 
 sub ldap_search_callback {
@@ -426,9 +379,9 @@ sub ldap_search_callback {
   my $syncstate = scalar @controls ? $controls[0] : undef;
   my ( $s, $st, $tt_vars, $map, $out_file_pfx, $out_file, $tmp_debug_msg, $rdn);
 
-  logg({ fg => $fg, pr => 'debug', fm => "syncstate: %s", ls => [ np( $syncstate ) ] })
+  $log->logg({ pr => 'debug', fm => "syncstate: %s", ls => [ $syncstate ] })
     if $v > 4;
-  logg({ fg => $fg, pr => 'debug', fm => "object: %s", ls => [ np( $obj ) ] })
+  $log->logg({ pr => 'debug', fm => "object: %s", ls => [ $obj ] })
     if $v > 4;
 
   if ( defined $obj && $obj->isa('Net::LDAP::Entry') ) {
@@ -439,56 +392,56 @@ sub ldap_search_callback {
       $st = $syncstate->state;
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
 	foreach $s ( @svc ) {
-	  logg({ fg => $fg, pr => 'debug',
-		 fm => sprintf("SERVICE: % 8s; ctrl_attr % 36s: % 6s; DN: %s",
+	  $log->logg({ pr => 'debug',
+		       fm => sprintf("SERVICE PREPROCESS: % 8s; is-there-control-attribute( % 36s) = % 6s; DN: %s",
 			       $s,
-			       $cfg->{$s}->{ctrl_attr},
-			       $obj->exists($cfg->{$s}->{ctrl_attr}) ? 'TRUE' : 'FALSE',
+			       $cf->get('service', $s, 'ctrl_attr'),
+			       $obj->exists($cf->get('service', $s, 'ctrl_attr')) ? 'TRUE' : 'FALSE',
 			       $obj->dn) })
 	    if $v > 2;
 
-	  next if ! $obj->exists($cfg->{$s}->{ctrl_attr});
+	  next if ! $obj->exists($cf->get('service', $s, 'ctrl_attr'));
 
-	  logg({ fg => $fg, pr => 'debug', fm => "%s: DN: %s", ls => [ SYNST->[$st], $obj->dn ] });
+	  $log->logg({ pr => 'debug', fm => "%s: DN: %s", ls => [ SYNST->[$st], $obj->dn ] });
 
-	  if ( exists $cfg->{$s}->{out_file_pfx} && exists $cfg->{$s}->{out_file} ) {
-	    $out_file_pfx = $obj->get_value($cfg->{$s}->{out_file_pfx});
+	  if ( $cf->is_set($s, 'out_file_pfx') && $cf->is_set($s, 'out_file') ) {
+	    $out_file_pfx = $obj->get_value($cf->get('service', $s, 'out_file_pfx'));
 	    if ( ! -d $out_file_pfx ) {
-	      logg({ fg => $fg, pr => 'err', fm => "service %s, target directory %s doesn't exist",
+	      $log->logg({ pr => 'err', fm => "service %s, target directory %s doesn't exist",
 		     ls => [ $s, $out_file_pfx ] });
 	      next;
 	    }
 	    $out_file =
 	      sprintf("%s/%s%s",
-		      $out_file_pfx, $cfg->{$s}->{out_file}, $cfg->{$s}->{out_ext} // '');
-	  } elsif ( ! exists $cfg->{$s}->{out_file_pfx} && exists $cfg->{$s}->{out_file}) {
+		      $out_file_pfx, $cf->get('service', $s, 'out_file'), $cf->get('service', $s, 'out_ext') // '');
+	  } elsif ( ! $cf->is_set($s, 'out_file_pfx') && $cf->is_set($s, 'out_file')) {
 	    $out_file =
-	      sprintf("%s%s", $cfg->{$s}->{out_file}, $cfg->{$s}->{out_ext} // '');
-	  } elsif ( ! exists $cfg->{$s}->{out_file_pfx} && ! exists $cfg->{$s}->{out_file}) {
-	    $out_file = sprintf("%s%s", $obj->get_value($rdn), $cfg->{$s}->{out_ext} // '');
+	      sprintf("%s%s", $cf->get('service', $s, 'out_file'), $cf->get('service', $s, 'out_ext') // '');
+	  } elsif ( ! $cf->is_set($s, 'out_file_pfx') && ! $cf->is_set($s, 'out_file')) {
+	    $out_file = sprintf("%s%s", $obj->get_value($rdn), $cf->get('service', $s, 'out_ext') // '');
 	  }
 
-	  logg({ fg => $fg, pr => 'debug', fm => "TT OUTPUT to: %s/%s",
-		 ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $out_file ] })
+	  $log->logg({ pr => 'debug', fm => "TT OUTPUT to: %s/%s",
+		 ls => [ $out_file_pfx // $cf->get('service', $s, 'out_path'), $out_file ] })
 	    if $v > 2;
 
 	  #
 	  ## collecting all mapped attributes values
 	  #
 	  foreach my $i ( ( 'm', 's') ) {
-	    $map = $s . '_map_' . $i;
-	    if ( exists $cfg->{$map} ) {
-	      foreach my $j (keys ( %{$cfg->{$map}} )) {
+	    if ( $cf->is_set($s, 'map', $i) ) {
+	      foreach my $j ( $cf->names_of($s, 'map', $i) ) {
 		if ( $j eq 'certificateRevocationList' ) {
-		  $tt_vars->{$j} = opensslize({ in => $obj->get_value($cfg->{$map}->{$j}) });
+		  $tt_vars->{$j} =
+		    opensslize({ in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
 		} else {
-		  $tt_vars->{$j} = $obj->get_value($cfg->{$map}->{$j}) // 'NA';
+		  $tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) // 'NA';
 		}
 	      }
 	    }
 	  }
 
-	  $tt_vars->{prog}       = sprintf("%s v.%s", $PROGNAM, $PROGVER);
+	  $tt_vars->{prog}       = sprintf("%s v.%s", $PROGNAM, $VERSION);
 	  $tt_vars->{DN}         = $obj->dn;
 	  $tt_vars->{date}       = strftime( $ts_fmt, localtime(time));
 	  $tt_vars->{descr}      = $obj->get_value('description')
@@ -511,12 +464,12 @@ sub ldap_search_callback {
 	  eval {
 	    $tmp_fh =
 	      File::Temp->new( UNLINK => 0,
-			       DIR    => $out_file_pfx // $cfg->{$s}->{out_path} );
+			       DIR    => $out_file_pfx // $cf->get('service', $s, 'out_path') );
 	  };
 	  if ( $@ ) {
-	    logg({ fg => $fg, pr => 'err',
+	    $log->logg({ pr => 'err',
 		   fm => "File::Temp->new( DIR => \"%s\" ) for service \"%s\" error: \"%s\"; we skip this service iteration...",
-		   ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $s, $@ ] });
+		   ls => [ $out_file_pfx // $cf->get('service', $s, 'out_path'), $s, $@ ] });
 	    next;
 	  }
 
@@ -525,83 +478,85 @@ sub ldap_search_callback {
 	  my $tt = Template->new( TRIM        => 1,
 				  ABSOLUTE    => 1,
 				  RELATIVE    => 1,
-				  OUTPUT_PATH => $out_file_pfx // $cfg->{$s}->{out_path},
-				  DEBUG       => $fg // $cfg->{_}->{tt_debug}, );
+				  OUTPUT_PATH => $out_file_pfx // $cf->get('service', $s, 'out_path'),
+				  DEBUG       => $fg // $cf->get(qw(core tt_debug)) );
 
-	  logg({ fg => $fg, pr => 'err',
+	  $log->logg({ pr => 'err',
 		 fm => "Template->new( OUTPUT_PATH => %s ) for service %s error: %s",
-		 ls => [ $out_file_pfx // $cfg->{$s}->{out_path}, $s, $! ] })
+		 ls => [ $out_file_pfx // $cf->get('service', $s, 'out_path'), $s, $! ] })
 	    if ! defined $tt;
 
 	  $tt->process( sprintf("%s/%s",
-				$cfg->{_}->{tt_path}, $cfg->{$s}->{tt_file}), $tt_vars, $tmp_fh ) ||
-				  do {
-				    logg({ fg => $fg, pr => 'err',
-					   fm => "%s .tt process error: %s",
-					   ls => [ SYNST->[$st], $tt->error] });
-				    next;
-				  };
+				$cf->get(qw(core tt_path)),
+				$cf->get('service', $s, 'tt_file')),
+				$tt_vars,
+				$tmp_fh ) || do {
+				  $log->logg({ pr => 'err',
+					       fm => "%s .tt process error: %s",
+					       ls => [ SYNST->[$st], $tt->error ] });
+				  next;
+				};
 
 	  close( $tmp_fh ) || do {
-	    logg({ fg => $fg, pr => 'err',
+	    $log->logg({ pr => 'err',
 		   fm => "close file (opened for writing), service %s, failed: %s",
 		   ls => [ $s, $! ] });
 	    next;
 	  };
 
-	  if ( -d $cfg->{$s}->{out_path} ) {
-	    chdir $cfg->{$s}->{out_path} ||
-	      logg({ fg => $fg, pr => 'err', fm => "chdir to %s failed",
-		     ls => [ $cfg->{$s}->{out_path} ] });
+	  if ( -d $cf->get('service', $s, 'out_path') ) {
+	    chdir $cf->get('service', $s, 'out_path') ||
+	      $log->logg({ pr => 'err', fm => "chdir to %s failed",
+		     ls => [ $cf->get('service', $s, 'out_path') ] });
 	  } else {
-	    logg({ fg => $fg, pr => 'err', fm => "chdir to %s failed, wrong path",
-		   ls => [ $cfg->{$s}->{out_path} ] });
+	    $log->logg({ pr => 'err', fm => "chdir to %s failed, wrong path",
+		   ls => [ $cf->get('service', $s, 'out_path') ] });
 	  }
 
 	  rename $tmp_fn, $out_file ||
-	    logg({ fg => $fg, pr => 'err', fm => "rename %s to %s, failed",
+	    $log->logg({ pr => 'err', fm => "rename %s to %s, failed",
 		   ls => [ $tmp_fn, $out_file ] });
 
 	  if ( -e $out_file ) {
-	    if ( exists $cfg->{$s}->{chmod} ) {
-	      chmod oct($cfg->{$s}->{chmod}), $out_file ||
-		logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed",
+	    if ( $cf->is_set($s, 'chmod') ) {
+	      chmod oct($cf->get('service', $s, 'chmod')), $out_file ||
+		$log->logg({ pr => 'err', fm => "chmod for %s failed",
 		       ls => [ $out_file ] });
-	    } elsif ( exists $cfg->{_}->{chmod} ) {
-	      chmod oct($cfg->{_}->{chmod}), $out_file ||
-		logg({ fg => $fg, pr => 'err', fm => "chmod for %s failed",
+	    } elsif ( $cf->is_set(qw(core chmod)) ) {
+	      chmod oct($cf->(qw(core chmod))), $out_file ||
+		$log->logg({ pr => 'err', fm => "chmod for %s failed",
 		       ls => [ $out_file ] });
 	    }
 
-	    if ( exists $cfg->{$s}->{chown} ) {
+	    if ( $cf->is_set($s, 'chown') ) {
 	      chown $obj->get_value('uidNumber'), $obj->get_value('gidNumber'), $out_file ||
-		logg({ fg => $fg, pr => 'err', fm => "chown ($s:$s) %s failed",
+		$log->logg({ pr => 'err', fm => "chown ($s:$s) %s failed",
 		       ls => [ $obj->get_value('uidNumber'),
 			       $obj->get_value('gidNumber'),
 			       $out_file ] });
 	    }
 	  } else {
-	    logg({ fg => $fg, pr => 'err', fm => "%s disappeared, no such file any more...",
+	    $log->logg({ pr => 'err', fm => "%s disappeared, no such file any more...",
 		   ls => [ $out_file ] });
 	  }
 	}
       } elsif ( $st == LDAP_SYNC_DELETE ) {
-	  logg({ fg => $fg, pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn] })
+	  $log->logg({ pr => 'debug', fm => "%s DN: %s", ls => [ SYNST->[$st], $obj->dn] })
 	    if $v > 1;
-	  if ( unlink $cfg->{$s}->{out_path} . '/' . $out_file ) {
-	    logg({ fg => $fg, pr => 'debug', fm => "file %s was successfully removed",
-		 ls => [ $cfg->{$s}->{out_path} . '/' . $out_file ] })
+	  if ( unlink $cf->get('service', $s, 'out_path') . '/' . $out_file ) {
+	    $log->logg({ pr => 'debug', fm => "file %s was successfully removed",
+		 ls => [ $cf->get('service', $s, 'out_path') . '/' . $out_file ] })
 	      if $v > 0;
 	  } else {
-	    logg({ fg => $fg, pr => 'err',
+	    $log->logg({ pr => 'err',
 		   fm => "file %s was not removed",
-		   ls => [ $cfg->{$s}->{out_path} . '/' . $out_file, $! ] });
+		   ls => [ $cf->get('service', $s, 'out_path') . '/' . $out_file, $! ] });
 	  }
 	}
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
-      logg({ fg => $fg, pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $v > 1;
+      $log->logg({ pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $v > 1;
     } elsif ( ! defined $syncstate ) {
-      logg({ fg => $fg, pr => 'warning',
+      $log->logg({ pr => 'warning',
 	     fm => "LDAP entry without Sync State control" }) if $v > 1;
     }
 
@@ -634,35 +589,13 @@ sub opensslize {
   waitpid( $pid, 0 );
   my $chst = $? >> 8;
   if ( $chst ) {
-    logg({ fg => $fg, pr => 'err',
+    $log->logg({ pr => 'err',
 	   fm => "opensslize() error!" }) if $v > 1;
   };
   
   $arg->{res} .= $_ while ( <$chou> );
   
   return $arg->{res};
-}
-
-sub read_ldap_config_file {
-    my $config_file = shift;
-    my $file;
-    my $line = 0;
-
-    open($file, "<", $config_file) || do {
-      die "cannot open $config_file: $!";
-      exit 1;
-    };
-    while (<$file>) {
-	++$line;
-	chomp;
-	s/^\s+//;
-	s/\s+$//;
-        s/#.*//;
-	next if ($_ eq "");
-	my @kwp = split(/\s+/, $_, 2);
-	$cfg->{ldap_config}->{lc($kwp[0])} = $kwp[1];
-    }
-    close($file);
 }
 
 =head1 USAGE
@@ -696,3 +629,5 @@ this configuration section service, in case it is absent we start the
 next iteration of the I<services> loop.
 
 =back
+
+=cut
