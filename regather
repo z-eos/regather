@@ -36,7 +36,7 @@ use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDA
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-my $VERSION    = '0.5';
+my $VERSION    = '0.6';
 
 =head1 NAME
 
