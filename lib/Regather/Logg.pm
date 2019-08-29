@@ -36,12 +36,15 @@ wrapper to log to syslog or stdin. On input it expects hash
 
 sub logg {
   my ( $self, $args ) = @_;
-  my $arg = { pr   => $args->{pr} // 'info',
-	      pr_s => sprintf("%s|%s",
-			      $args->{pr}, $self->{facility} // 'local4'),
-	      pr_f => sprintf("<%s:%s> ",
-			      $self->{facility} // 'CONFIG FILE PARSE', $args->{pr}),
-	      fm   => $args->{fm}, };
+  my $arg = {
+	     fg   => $args->{fg} // $self->{foreground},
+	     pr   => $args->{pr} // 'info',
+	     pr_s => sprintf("%s|%s",
+			     $args->{pr}, $self->{facility} // 'local4'),
+	     pr_f => sprintf("%s:%s ",
+			     $self->{facility} // 'CONFIG FILE PARSE', $args->{pr}),
+	     fm   => $args->{fm},
+	    };
 
   if ( exists $args->{ls} ) {
     @{$arg->{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ } @{$args->{ls}};
@@ -49,9 +52,12 @@ sub logg {
     $arg->{ls} = [];
   }
 
-  if ( $self->{foreground} ) {
+  if ( $arg->{fg} ) {
     $arg->{msg} = sprintf $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}};
-    p($arg->{msg}, colored => $self->{colors} && $self->{foreground}, caller_info => 0 );
+    p($arg->{msg},
+      colored => $self->{colors} && $self->{foreground},
+      caller_info => 0,
+      output => 'stdout' );
   } else {
     syslog( $arg->{pr_s}, $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}} );
   }
