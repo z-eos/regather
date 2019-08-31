@@ -278,6 +278,12 @@ sub chk_dir_pid {
   return 1;
 }
 
+=header2 chk_file_tt
+
+.tt file checker
+
+=cut
+
 sub chk_file_tt {
   my ($self, $valref, $prev_value, $locus) = @_;
   my $tt = sprintf("%s/%s",
@@ -361,6 +367,7 @@ raw          = STRING
 scope        = STRING :default sub
 sizelimit    = NUMBER :default 0
 timelimit    = NUMBER :default 0
+log_base     = STRING
 
 [ldap bnd]
 anonymous    = STRING

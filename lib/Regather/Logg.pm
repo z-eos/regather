@@ -9,6 +9,8 @@ use diagnostics;
 use Sys::Syslog qw(:standard :macros);
 use Data::Printer caller_info => 1, class => { expand => 2 };
 
+
+
 sub new {
   my $class           = shift;
   local %_            = @_;
@@ -23,7 +25,7 @@ sub new {
   $self
 }
 
-=head2 logg
+=item logg
 
 wrapper to log to syslog or stdin. On input it expects hash
 
@@ -63,6 +65,21 @@ sub logg {
   }
 }
 
+sub logg_ldap_err {
+  my ( $self, $args ) = @_;
+  $self->logg({ pr => 'err', fm => "LDAP ERROR:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		ls => [ 'ERROR: ',        $args->{mesg}->error_name,
+			'TEXT: ',         $args->{mesg}->error_text,
+			'DESCRIPTION: ',  $args->{mesg}->error_desc,
+			'SERVER ERROR: ', $args->{mesg}->server_error ] });
+}
+
+=item set_m
+
+from config file options, setter
+
+=cut
+
 sub set_m {
   my ( $self, $cf ) = @_;
   if ( ref($cf) eq 'HASH' ) {
@@ -76,6 +93,12 @@ sub set_m {
     return 0;
   }
 }
+
+=head2 set_m
+
+by one option, setter
+
+=cut
 
 sub set {
   my ( $self, $k, $v ) = @_;
@@ -93,5 +116,6 @@ sub get {
     return;
   }
 }
+
 
 1;
