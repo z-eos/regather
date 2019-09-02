@@ -421,6 +421,17 @@ sub error {
 			  ls => [ $locus, $err ] });
 }
 
+=head1 CONFIG FILE
+
+An ini-style configuration file is a textual file consisting of settings grouped into one or more sections.
+
+1. do read L<Config::Parser::Ini> documentation section B<DESCRIPTION> for general description of format used.
+
+2. look at the output of: regather -c ./etc/regather.conf --config-help
+
+3. look into sources ... (to be amended)
+=cut
+
 
 1;
 

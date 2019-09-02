@@ -39,72 +39,6 @@ my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
 my $VERSION    = '0.65';
 
-=head1 NAME
-
-regather - syncrepl consumer to generate ( re gather ) files on syncrepl event.
-
-=cut
-
-=head1 SYNOPSIS
-
-use option [-h|--help|-? -F] <-c regather.conf> [ -C section.option=value, ... ]
-
-=cut
-
-=head1 DESCRIPTION
-
-regather is a syncrepl consumer to generate files on LDAP synrepl events.
-
-It uses Net::LDAP(3) to do all LDAP related stuff and Template(3) to
-generate files. Config file is processed with Config::Parser(3) (it's
-format described in Regather::Config(3)
-
-As example, regather will re-write each OpenVPN client config file on
-change, or re-write CRL file on update in LDAP or change sieve script
-for mail user.
-
-=cut
-
-=head1 OPTIONS
-
-=over 4
-
-=item B<-c | --config>
-
-config file ( mandatory)
-
-=item B<-f | --foreground>
-
-run in foreground (optional)
-
-=item B<--colors>
-
-terminal colors are used in foreground debug output. (optional)
-
-=item B<-C | --cli> section.option = value
-
-CLI equivalent to config file options. (optional, can be multiple)
-
-for example I<core.dryrun=1> (for full list of options available see Regather::Conf(3))
-
-=item B<--config-help>
-
-print config file lexicon (require option I<-c>, set)
-
-=item B<-v>
-
-verbosity (optional, incremental)
-
-=item B<-h | --help>
-
-help page
-
-=back
-
-=cut
-
-
-
 my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
 my $ts_fmt = "%a %F %T %Z (%z)";
 
@@ -703,11 +637,86 @@ sub opensslize {
   return $arg->{res};
 }
 
+__END__
+
+=head1 NAME
+
+I<regather> - syncrepl consumer to perform action desired on
+syncrepl event.
+
+=head1 SYNOPSIS
+
+regather [-h|--help|-? -F] <-c regather.conf> [ -C section.option=value, ... ]
+
+=head1 DESCRIPTION
+
+I<regather> is a syncrepl consumer to generate ( B<re-gather> ) files
+on LDAP synrepl events or even more, it can perform any action you set (like
+create/delete directories or other).
+
+It uses L<Net::LDAP> to do all LDAP related stuff and L<Template> to
+generate files. Config file is processed with L<Config::Parser> (look
+B<CONFIG FILE> section bellow)
+
+As an example, regather will re-write each OpenVPN client config file on
+change, or re-write CRL file on update in LDAP or change sieve script
+for mail user.
+
+I<regather> is configured via it's configuration file. Each
+configuration option can be overidden via CLI options like I<-C
+section.subsection.subsubsection.option=value>
+
+I<regather> connects to LDAP I<ldap.opt.uri> configured and performs
+search with I<ldap.srch.filter> which B<has to provide search result
+for all> configured I<service>s
+
+Search results are used to provide data for Template(3) to:
+
+- write target file, using configured I<core.tt_path/service.XXX.tt_file>
+
+- manipulate with service/s directory/ies
+
+- to be continued...
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-c | --config>
+
+config file (mandatory)
+
+=item B<-f | --foreground>
+
+run in foreground (optional)
+
+=item B<--colors>
+
+terminal colors are used in foreground debug output. (optional)
+
+=item B<-C | --cli> section.option = value
+
+CLI equivalent to config file options. (optional, can be multiple)
+
+for example I<core.dryrun=1> (for full list of options available see Regather::Conf(3))
+
+=item B<--config-help>
+
+print config file lexicon (require option I<-c>, set)
+
+=item B<-v>
+
+verbosity (optional, incremental)
+
+=item B<-h | --help>
+
+help page
+
+=back
+
 =head1 USAGE
 
 regather <-c regather.conf> [ all other options ]
-
-=cut
 
 =head1 FILES
 
@@ -721,12 +730,33 @@ regather <-c regather.conf> [ all other options ]
 
 =head1 CONFIG FILE
 
-config file format is described in Regather::Config(3)
-
-=cut
+config file format is described in L<Regather::Config>
 
 =head1 SEE ALSO
 
-Net::LDAP(3), Template(3), Regather::Config(3)
+L<Net::LDAP>,
+L<Template>,
+L<Regather::Config>
+
+=head1 AUTHOR
+
+Zeus Panchenko E<lt>zeus@gnu.org.uaE<gt>
+
+=head1 COPYRIGHT
+
+Copyright (c) 2019 Zeus Panchenko. All rights reserved.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 3, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
