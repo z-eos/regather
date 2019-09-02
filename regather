@@ -141,7 +141,7 @@ my $cf = new Regather::Config ( filename  => $config,
 				verbose   => $v );
 
 if ( ! defined $cf ) {
-  $log->logg({ fg => $fg, pr => 'err', fm => "do fix config file ..." });
+  $log->logg({ pr => 'err', fm => "do fix config file ..." });
   pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
   exit 1;
 }

@@ -61,6 +61,72 @@ use constant LDAP => { opt => { async      => '',
 			      }
 		     };
 
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+Regather::Config - config file processing class
+
+=head1 SYNOPSIS
+
+    use Regather::Config;
+    my $cf = new Regather::Config ( filename  => $config,
+    			            logger    => $log,
+    				    cli       => $cli,
+    				    verbose   => $v );
+
+    if ( ! defined $cf ) {
+      $log->logg({ pr => 'err', fm => "do fix config file ..." });
+      pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
+      exit 1;
+    }
+
+    if ( $config_file_options_help_requested ) {
+      $cf->config_help;
+      exit 1;
+    }
+=head1 DESCRIPTION
+
+This is a class to log messages.
+
+=head1 CONSTRUCTOR
+
+=over 4
+
+=item new
+
+Creates a new B<Regather::Config> object
+
+=over 4
+
+=item filename =E<gt> config-file-name
+
+Name of the file to parse.
+
+=item cli =E<gt> = delete $_{cli};
+
+Hash with CLI provided config options.
+
+=item logger =E<gt> = delete $_{logger};
+
+Regather::Logg object created preliminary.
+
+=item fg =E<gt> 0 | 1
+
+wheather we run in foreground
+
+=item verbose  =E<gt> N
+
+verbosity level
+
+=back
+
+=back
+
+=cut
+
 sub new {
   my $class = shift;
   local %_  = @_;
@@ -105,6 +171,26 @@ sub new {
   $self
 }
 
+=head1 METHODS
+
+=over 4
+
+=item get_ldap_config_file
+
+ldap.conf processing to add options from it to config object
+
+files searched are:
+
+    $ENV{LDAP_CONF}
+    /usr/local/etc/openldap/ldap.conf
+    /etc/ldap.conf
+    /etc/ldap/ldap.conf
+    /etc/openldap/ldap.conf );
+
+the first one found is used.
+
+=cut
+
 sub get_ldap_config_file {
   my $self = shift;
 
@@ -144,6 +230,12 @@ sub get_ldap_config_file {
     }
   }
 }
+
+=item mangle
+
+modify the created source tree. (resolve I<uid/gid> symbolic to number, add I<altroot>)
+
+=cut
 
 sub mangle {
   my $self = shift;
@@ -221,9 +313,9 @@ sub mangle {
   }
 }
 
-=head2 chk_dir
+=item config_help
 
-check wheather the target directory exists
+print config lexicon help
 
 =cut
 
@@ -249,7 +341,7 @@ sub config_help {
   }
 }
 
-=head2 chk_dir
+=item chk_dir
 
 check wheather the target directory exists
 
@@ -278,9 +370,9 @@ sub chk_dir_pid {
   return 1;
 }
 
-=header2 chk_file_tt
+=item chk_file_tt
 
-.tt file checker
+.tt file existance checker
 
 =cut
 
@@ -298,12 +390,26 @@ sub chk_file_tt {
   return 1;
 }
 
+=item core_only
+
+informer (to spawn error if I<core> section option appears in other section)
+
+=cut
+
 sub core_only {
   my ($self, $valref, $prev_value, $locus) = @_;
   $self->error(sprintf("wrong location for option, it can appear only in the section \"core\""),
 	       locus => $locus);
   return 0;
 }
+
+=item error
+
+error handler
+
+=back
+
+=cut
 
 sub error {
   my $self = shift;
@@ -315,18 +421,6 @@ sub error {
 			  ls => [ $locus, $err ] });
 }
 
-
-=item B<[ldap]>
-
-debug = N
-
-LDAP debug level
-    1   outgoing packets (asn_hexdump).
-    2   incoming packets (asn_hexdump).
-    4   outgoing packets (asn_dump).
-    8   incoming packets (asn_dump).
-
-=cut
 
 1;
 
