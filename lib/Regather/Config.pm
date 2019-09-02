@@ -177,7 +177,8 @@ sub new {
 
 =item get_ldap_config_file
 
-ldap.conf processing to add options from it to config object
+ldap.conf processing (with L<Config::Parser::ldap>) to add options
+from it to config object
 
 files searched are:
 

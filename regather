@@ -42,10 +42,10 @@ my $VERSION    = '0.65';
 my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
 my $ts_fmt = "%a %F %T %Z (%z)";
 
-our $v            = 0;
-our $fg           = 0;
-my $colors        = 0;
-my $config        = '/usr/local/etc/regather.conf';
+our $v     = 0;
+our $fg    = 0;
+my $colors = 0;
+my $config = '/usr/local/etc/regather.conf';
 my $cli;
 my $ch;
 
@@ -731,6 +731,13 @@ regather <-c regather.conf> [ all other options ]
 =head1 CONFIG FILE
 
 config file format is described in L<Regather::Config>
+
+=head1 SIGNALS
+
+HUP - restart
+
+INT, QUIT, ABRT, TERM - terminate
+
 
 =head1 SEE ALSO
 
