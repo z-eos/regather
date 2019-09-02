@@ -426,6 +426,9 @@ sub ldap_search_callback {
 	      $obj = $entry;
 	      $ldif->done;
 	    } elsif ( $entry->get_value('reqType') eq 'modify' ) {
+	      ### here we re-assemble $obj to have all attributes before deletion
+	      ### and since after that it'll has ctrl_attr but reqType=delete,
+	      ### it'll go to $st == LDAP_SYNC_DELETE
 	      %reqmod =
 		map  { substr($_, 0, -2) => 1 }
 		grep { /^(.*):-$/g }

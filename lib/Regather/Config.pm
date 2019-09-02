@@ -316,7 +316,9 @@ sub error {
 }
 
 
-=item B<--ldap-debug>
+=item B<[ldap]>
+
+debug = N
 
 LDAP debug level
     1   outgoing packets (asn_hexdump).

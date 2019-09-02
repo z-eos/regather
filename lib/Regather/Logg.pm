@@ -9,8 +9,6 @@ use diagnostics;
 use Sys::Syslog qw(:standard :macros);
 use Data::Printer caller_info => 1, class => { expand => 2 };
 
-
-
 sub new {
   my $class           = shift;
   local %_            = @_;
@@ -24,17 +22,6 @@ sub new {
 
   $self
 }
-
-=item logg
-
-wrapper to log to syslog or stdin. On input it expects hash
-
-    fg => foreground: stdin or syslog
-    pr => priority: level[|facility]
-    fm => format: sprintf format
-    ls => list of values to be sprintf-ed with format fm
-
-=cut
 
 sub logg {
   my ( $self, $args ) = @_;
@@ -74,12 +61,6 @@ sub logg_ldap_err {
 			'SERVER ERROR: ', $args->{mesg}->server_error ] });
 }
 
-=item set_m
-
-from config file options, setter
-
-=cut
-
 sub set_m {
   my ( $self, $cf ) = @_;
   if ( ref($cf) eq 'HASH' ) {
@@ -93,12 +74,6 @@ sub set_m {
     return 0;
   }
 }
-
-=head2 set_m
-
-by one option, setter
-
-=cut
 
 sub set {
   my ( $self, $k, $v ) = @_;
@@ -117,5 +92,124 @@ sub get {
   }
 }
 
-
 1;
+
+__END__
+
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+Regather::Logg - logging class
+
+=head1 SYNOPSIS
+
+    use Regather::Logg;
+    my $log = new Regather::Logg( prognam    => 'MyAppName',
+			          foreground => $foreground_or_syslog,
+			          colors     => $wheather_to_use_term_colors );
+    $log->logg({ pr => 'info', fm => "Regather::Logg initialized ... (write to syslog)" });
+    $log->logg({ fg => 1, fm => "Regather::Logg initialized ... (write to STDOUT)" });
+    ...
+    my $mesg = $ldap->search( filter => "(objectClass=unsearchebleThing)");
+    $log->logg_ldap_err({ mesg => $mesg });
+
+=head1 DESCRIPTION
+
+This is a class to log messages.
+
+=head1 CONSTRUCTOR
+
+=over 4
+
+=item new
+
+Creates a new B<Regather::Logg> object
+
+=over 4
+
+=item prognam =E<gt> 'MyAppName'
+
+program name
+
+=item foreground =E<gt> 1 | 0
+
+STDOUT or syslog, default is: 0
+
+=item colors =E<gt> 1 | 0
+
+wheather to use terminal colors, default is: 0
+
+=item ts_fmt =E<gt> 'strftime(3) format string'
+
+timestamp format string, default is: "%a %F %T %Z (%z)"
+
+=back
+
+=back
+
+=head1 METHODS
+
+=over 4
+
+=item logg
+
+main method to do the job
+
+=over 4
+
+=item fg =E<gt> 1 | 0
+
+foreground: stdin or syslog
+
+=item pr =E<gt> 'level[|facility]'
+
+priority
+
+=item fm =E<gt> "... %s ... : %m"
+
+sprintf format string, with the addition that %m is replaced with "$!"
+
+=item ls =E<gt> [ $a, $b, ... ]
+
+list of values to be passed to sprintf as arguments
+
+=back
+
+=item logg_ldap_err
+
+method - wrapper around Net::LDAP::Message->error methods
+
+=over 4
+
+=item mesg =E<gt> Net::LDAP::Message object
+
+wrapper to log to syslog or stdin. On input it expects hash
+
+=back
+
+=item set
+
+setter to set one single pair key => value
+
+=over 4
+
+=item key =E<gt> value
+
+=back
+
+=item set_m
+
+setter to set options from config file
+
+on input it expects Regather::Config object section for Regather::Logg
+
+=item get
+
+getter
+
+=back
+
+=cut
