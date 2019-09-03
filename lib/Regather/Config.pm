@@ -327,11 +327,22 @@ sub config_help {
   foreach (sort keys %$lex) {
     print "\n[$_]\n";
     while ( my($k,$v) = each %{$lex->{$_}->{section}} ) {
-      print sprintf("  %- 20s :default %- 40s :re %- 25s :check %s\n",
-		    $k,
-		    $v->{default} ? $v->{default} : '',
-		    $v->{re} ? $v->{re}           : '',
-		    $v->{check} ? $v->{check}     : '');
+      if ( exists $v->{section} ) {
+	print "\n[$_ $k]\n";
+	while ( my($kk,$vv) = each %{$v->{section}} ) {
+	  print sprintf("  %- 20s :default %- 40s :re %- 25s :check %s\n",
+			$kk,
+			$vv->{default} ? $vv->{default} : '',
+			$vv->{re} ? $vv->{re}           : '',
+			$vv->{check} ? $vv->{check}     : '');
+	}
+      } else {
+	print sprintf("  %- 20s :default %- 40s :re %- 25s :check %s\n",
+		      $k,
+		      $v->{default} ? $v->{default} : '',
+		      $v->{re} ? $v->{re}           : '',
+		      $v->{check} ? $v->{check}     : '');
+      }
     }
   }
 
@@ -422,15 +433,24 @@ sub error {
 			  ls => [ $locus, $err ] });
 }
 
+
 =head1 CONFIG FILE
 
-An ini-style configuration file is a textual file consisting of settings grouped into one or more sections.
+An ini-style configuration file is a textual file consisting of
+settings grouped into one or more sections.
 
-1. do read L<Config::Parser::Ini> documentation section B<DESCRIPTION> for general description of format used.
+1. do read L<Config::Parser::Ini> documentation section B<DESCRIPTION>
+for general description of the format used.
 
-2. look at the output of: regather -c ./etc/regather.conf --config-help
+2. look at the output of: I<regather -c regather.conf --config-help>
 
-3. look into sources ... (to be amended)
+3. look into sources ... (this section is to be amended)
+
+So, in general, config file consists of mandatory sections (with theirs
+subsections) B<core>, B<ldap> and B<service>
+
+Each section has mandatory options.
+
 =cut
 
 

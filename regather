@@ -678,6 +678,39 @@ Search results are used to provide data for Template(3) to:
 
 - to be continued...
 
+=head1 OPERATIONS
+
+On LDAP repl event, consumer receives syncstate, we process these three:
+
+    LDAP_SYNC_ADD
+    LDAP_SYNC_MODIFY
+    LDAP_SYNC_DELETE
+
+on LDAP_SYNC_ADD and LDAP_SYNC_MODIFY we just overwrite all configured
+for the service things (files, directories e.t.c.)
+
+LDAP_SYNC_DELETE differs a bit, it can be spawned by deletion of LDAP
+object itself or by deletion of some attribute of the object. So, on that
+event we restore previous state of the object from accesslog DB (which
+is mandatory for our work) and look at the attribute reqType value. 
+
+There are two cases we take care of:
+
+=over 4
+
+=item I<reqType = delete>
+
+this is the deletion of the whole object and we destroy all related
+stuff, configured for that service.
+
+=item I<reqType = modify>
+
+this is the deletion of an attribute and we need to know whether it
+was I<ctrl_attr> one (look B<CONFIG FILE> section bellow). If it is,
+then we destroy all related stuff, configured in service.
+
+=back
+
 =head1 OPTIONS
 
 =over 4
@@ -730,7 +763,7 @@ regather <-c regather.conf> [ all other options ]
 
 =head1 CONFIG FILE
 
-config file format is described in L<Regather::Config>
+config file format is described in L<Regather::Config> documentation.
 
 =head1 SIGNALS
 
