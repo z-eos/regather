@@ -327,21 +327,27 @@ sub config_help {
   foreach (sort keys %$lex) {
     print "\n[$_]\n";
     while ( my($k,$v) = each %{$lex->{$_}->{section}} ) {
-      if ( exists $v->{section} ) {
+      if ( ref($v) eq 'HASH' && exists $v->{section} ) {
 	print "\n[$_ $k]\n";
 	while ( my($kk,$vv) = each %{$v->{section}} ) {
-	  print sprintf("  %- 20s :default %- 40s :re %- 25s :check %s\n",
-			$kk,
-			$vv->{default} ? $vv->{default} : '',
-			$vv->{re} ? $vv->{re}           : '',
-			$vv->{check} ? $vv->{check}     : '');
+	  if ( ref($vv) eq 'HASH' && exists $vv->{section} ) {
+	    print "\n[$_ $k $kk]\n";
+	    while ( my($kkk,$vvv) = each %{$vv->{section}} ) {
+	      if ( ref($vvv) eq 'HASH' && exists $vvv->{section} ) {
+		print "\n[$_ $k $kk $kkk]\n";
+		while ( my($kkkk,$vvvv) = each %{$vvv->{section}} ) {
+		  print $self->config_help_opt($kkkk, $vvvv);
+		}
+	      } else {
+		print $self->config_help_opt($kkk, $vvv);
+	      }
+	    }
+	  } else {
+	    print $self->config_help_opt($kk, $vv);
+	  }
 	}
       } else {
-	print sprintf("  %- 20s :default %- 40s :re %- 25s :check %s\n",
-		      $k,
-		      $v->{default} ? $v->{default} : '',
-		      $v->{re} ? $v->{re}           : '',
-		      $v->{check} ? $v->{check}     : '');
+	print $self->config_help_opt($k, $v);
       }
     }
   }
@@ -351,6 +357,16 @@ sub config_help {
     $self->{logger}->logg({ fg => 1, pr => 'info', fm => "lexicon():%s\n%s",
 			    ls => [ '-' x 70, $lex ] });
   }
+}
+
+sub config_help_opt {
+  my ($self, $k, $v) = @_;
+  return sprintf("  %- 20s%s%s%s%s\n",
+		 $k,
+		 $v->{mandatory} ? ' :mandatory' : '',
+		 $v->{default}   ? ' :default ' . $v->{default} : '',
+		 $v->{re}        ? ' :re ' . $v->{re}      : '',
+		 $v->{check}     ? ' :check ' . $v->{check}   : '');
 }
 
 =item chk_dir
