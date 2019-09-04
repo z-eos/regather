@@ -472,6 +472,33 @@ of the attribute to check in event LDAP object. In case it is present,
 the object is considered to be processed, in case it is absent, we
 skip that event (since LDAP object has no I<ctrl_attr>)
 
+=head1 SEE ALSO
+
+L<Config::Parser>,
+L<Config::Parser::Ini>,
+L<Config::Parser::ldap>
+
+=head1 AUTHOR
+
+Zeus Panchenko E<lt>zeus@gnu.org.uaE<gt>
+
+=head1 COPYRIGHT
+
+Copyright 2019 Zeus Panchenko.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 3, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 =cut
 
 

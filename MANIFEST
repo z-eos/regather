@@ -1,0 +1,13 @@
+etc/regather.conf
+etc/regather.d/crl.tt
+etc/regather.d/ovpn.tt
+etc/regather.d/sieve.tt
+lib/Regather/Config.pm
+lib/Regather/Logg.pm
+LICENSE
+Makefile.PL
+MANIFEST
+MYMETA.json
+MYMETA.yml
+README.md
+regather

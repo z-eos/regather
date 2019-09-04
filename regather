@@ -5,12 +5,12 @@
 use strict;
 use warnings;
 use diagnostics;
-use Pod::Usage qw(pod2usage);
 use POSIX;
 use Template;
-use Sys::Syslog qw(:standard :macros);
+use Pod::Usage   qw(pod2usage);
+use Sys::Syslog  qw(:standard :macros);
 use Getopt::Long qw(:config no_ignore_case gnu_getopt auto_version);
-use List::Util qw( uniqstr );
+use List::Util   qw(uniqstr);
 use IPC::Open2;
 use File::Temp;
 use File::Basename;
@@ -29,15 +29,14 @@ use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_SYNC_DELETE
 			    LDAP_CONNECT_ERROR
 			    LDAP_OPERATIONS_ERROR
-			    LDAP_LOCAL_ERROR
-			 );
+			    LDAP_LOCAL_ERROR );
 use Net::LDAP::Control::SyncRequest;
 
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-my $VERSION    = '0.65';
+our $VERSION    = '0.70';
 
 my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
 my $ts_fmt = "%a %F %T %Z (%z)";
@@ -94,7 +93,7 @@ $log->logg({ pr => 'info', fm => "Config::Parse object as hash:\n%s",
 $log->logg({ pr => 'info', fm => "%s v.%s is starting ...",
 	     ls => [ $PROGNAM, $VERSION ] });
 
-our @svc = $cf->names_of('service');
+our @svc = grep { $cf->get('service', $_, 'skip') != 1 } $cf->names_of('service');
 
 daemonize() if ! $fg;
 
@@ -316,7 +315,7 @@ sub ldap_search_callback {
 	$st = $syncstate->state;
 	my $ldif;
 	my %reqmod;
-	$log->logg({ pr => 'debug', fm => "%s: DN: %s", ls => [ SYNST->[$st], $obj->dn ] });
+	$log->logg({ pr => 'debug', fm => "control %s: DN: %s", ls => [ SYNST->[$st], $obj->dn ] });
 
 	### LDAP_SYNC_DELETE arrives for both, object deletetion and attribute deletion
 	### in both cases Net::LDAP::Entry provided contains only DN, so, we need
@@ -395,6 +394,13 @@ sub ldap_search_callback {
 	foreach ( @svc ) {
 	  $s = $_
 	    if $obj->exists($cf->get('service', $_, 'ctrl_attr'));
+	}
+	if ( ! defined $s ) {
+	  $log->logg({ pr => 'debug',
+		       fm => "DN: %s is not configured to be processed on control: %s",
+		       ls => [ $obj->dn, SYNST->[$st] ] })
+	    if $v > 2;
+	  return;
 	}
 
 	### PREPARING OUTPUT RELATED VARIABLES
@@ -641,7 +647,7 @@ __END__
 
 =head1 NAME
 
-I<regather> - syncrepl consumer to perform action desired on
+regather - syncrepl consumer to perform action desired on
 syncrepl event.
 
 =head1 SYNOPSIS
@@ -784,7 +790,7 @@ Zeus Panchenko E<lt>zeus@gnu.org.uaE<gt>
 
 =head1 COPYRIGHT
 
-Copyright (c) 2019 Zeus Panchenko. All rights reserved.
+Copyright 2019 Zeus Panchenko.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
