@@ -7,7 +7,5 @@ lib/Regather/Logg.pm
 LICENSE
 Makefile.PL
 MANIFEST
-MYMETA.json
-MYMETA.yml
 README.md
 regather

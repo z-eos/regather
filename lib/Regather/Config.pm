@@ -146,7 +146,6 @@ sub new {
   $self->get_ldap_config_file;
 
   $self->parse($filename);
-  $self->commit or return;
 
   if ( defined $cli && ref($cli) eq 'HASH' ) {
     while ( my( $k, $v ) = each %{$cli} ) {
@@ -168,6 +167,9 @@ sub new {
       }
     }
   }
+
+  $self->commit or return;
+
   $self
 }
 
@@ -308,6 +310,9 @@ sub mangle {
 		       substr($self->get('service', $_, 'out_path'), 1),
 		       new Text::Locus(sprintf("in \"%s\" ", $self->get(qw(core altroot))), 1)) ||
 			 exit 1;
+      $self->{logger}->logg({ pr => 'debug', fm => "service %s out_path has been changed to %s",
+			      ls => [ $_, $self->get('service.' . $_ . '.out_path') ] })
+	if $self->{verbose} > 1;
     }
   } else {
     chdir('/');

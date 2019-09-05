@@ -36,7 +36,7 @@ use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDA
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-our $VERSION    = '0.70';
+our $VERSION    = '0.71';
 
 my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
 my $ts_fmt = "%a %F %T %Z (%z)";
@@ -151,7 +151,7 @@ while ( $last_forever ) {
     exit LDAP_CONNECT_ERROR;
   };
 
-  my $start_tls_options = $cf->getnode(qw(ldap ssl))->as_hash;
+  my $start_tls_options = $cf->getnode(qw(ldap ssl))->as_hash if $cf->is_section(qw(ldap ssl));
   if ( exists $start_tls_options->{ssl} && $start_tls_options->{ssl} eq 'start_tls' ) {
     delete $start_tls_options->{ssl};
     eval {
@@ -166,7 +166,7 @@ while ( $last_forever ) {
     }
   }
 
-  my $bind = $cf->getnode(qw(ldap bnd))->as_hash;
+  my $bind = $cf->getnode(qw(ldap bnd))->as_hash if $cf->is_section(qw(ldap bnd));
   if ( ref($bind) eq 'HASH' ) {
     if ( exists $bind->{dn} ) {
       my @bind_options;
