@@ -112,6 +112,7 @@ foreach my $i ( @svc ) {
   foreach ( qw( s m ) ) {
     if ( $cf->is_section('service', $i, 'map', $_) ) {
       @svc_map = values( %{ $cf->getnode('service', $i, 'map', $_)->as_hash } );
+      push @svc_map, $cf->getnode('service', $i, 'ctrl_attr');
       $cfgattrs = [ @{$cfgattrs}, @svc_map ];
     } else {
       @svc_map = ();
@@ -441,7 +442,6 @@ sub ldap_search_callback {
 	if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) { ### >>>>>>>>> 1
 
 	  ### COLLECTING ALL MAPPED ATTRIBUTES VALUES
-	  ### if any `map s` doesn't exist, we delete that config file
 	  foreach my $i ( ( 'm', 's') ) {
 	    if ( $cf->is_section('service', $s, 'map', $i) ) {
 	      foreach my $j ( $cf->names_of('service', $s, 'map', $i) ) {
@@ -459,7 +459,12 @@ sub ldap_search_callback {
 				   ls => [ $dir . '/' . $out_file, $! ] });
 		    }
 		  }
+
+		  ### if any of `map s` attributes doesn't exist, we
+		  ### delete that config file preliminaryly and skip
+		  ### that attribute from been processed by Template
 		  next;
+
 		} else {
 		  if ( $j =~ /certificateRevocationList/ ) {
 		    $tt_vars->{$j} =
@@ -561,7 +566,7 @@ sub ldap_search_callback {
 			   ls => [ $tmp_fn, $dir . '/' . $out_file ] });
 
 	    if ( -e $dir . '/' . $out_file ) {
-	      if ( $cf->is_set($s, 'chmod') ) {
+	      if ( $cf->is_set('service', $s, 'chmod') ) {
 		chmod oct($cf->get('service', $s, 'chmod')), $dir . '/' . $out_file ||
 		  $log->logg({ pr => 'err', fm => "chmod for %s failed",
 			       ls => [ $dir . '/' . $out_file ] });
@@ -571,7 +576,7 @@ sub ldap_search_callback {
 			       ls => [ $dir . '/' . $out_file ] });
 	      }
 
-	      if ( $cf->is_set($s, 'chown') ) {
+	      if ( $cf->is_set('service', $s, 'chown') ) {
 		chown $obj->get_value('uidNumber'),
 		  $obj->get_value('gidNumber'),
 		  $dir . '/' . $out_file ||
