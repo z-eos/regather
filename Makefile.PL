@@ -12,15 +12,15 @@ WriteMakefile(NAME             => 'regather',
               LICENSE          => 'gpl_3',
               MIN_PERL_VERSION => 5.016001,
               PREREQ_PM        => {
-				   'Data::Printer'        => '0.40',
+				   'Data::Printer'        => '0.38',
 				   'File::Temp'           => '0.22',
 				   'Text::Locus'          => '1.01',
 				   'Config::AST'          => '1.05',
 				   'Config::Parser'       => '1.04',
 				   'Config::Parser::ldap' => '1.00',
 				   'Net::LDAP'            => '0.65',
-				   'Template::Toolkit'    => '2.29',
-				   'Sys::Syslog'          => '0.35'
+				   'Template'             => '2.29',
+				   'Sys::Syslog'          => '0.29'
 				  },
               META_MERGE      =>
 	      {

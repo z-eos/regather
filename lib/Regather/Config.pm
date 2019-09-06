@@ -465,20 +465,27 @@ for general description of the format used.
 
 2. look at the output of: I<regather -c regather.conf --config-help>
 
-3. look into sources ... (this section is to be amended)
+3. look into sources ... (this section is to be amended yet)
 
 So, in general, config file consists of mandatory sections (with theirs
 subsections) B<core>, B<ldap> and B<service>
 
-Each section has mandatory options.
+Each section can have mandatory options.
 
 Each I<service> must have the option I<ctrl_attr> which contains name
 of the attribute to check in event LDAP object. In case it is present,
 the object is considered to be processed, in case it is absent, we
 skip that event (since LDAP object has no I<ctrl_attr>)
 
+Each I<service> must have atleast one of two possible maps. Those maps
+are for mapping .tt variables to LDAP attributes values. Maps have
+names I<s> for single value attributes and I<m> for attributes which
+can have multiple values.
+
 =head1 SEE ALSO
 
+L<Regather::Logg>,
+L<Config::AST>,
 L<Config::Parser>,
 L<Config::Parser::Ini>,
 L<Config::Parser::ldap>

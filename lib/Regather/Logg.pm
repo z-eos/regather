@@ -18,7 +18,7 @@ sub new {
   $self->{colors}     = $_{colors}     // 0;
   $self->{ts_fmt}     = "%a %F %T %Z (%z)";
 
-  openlog($self->{prognam}, "ndelay,pid");
+  openlog($self->{prognam}, "ndelay,pid") if ! $self->{foreground};
 
   $self
 }

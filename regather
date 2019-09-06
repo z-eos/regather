@@ -89,7 +89,7 @@ $log->set_m( $cf->getnode('log')->as_hash );
 $log->logg({ pr => 'info', fm => "Dry Run is set on, no file is to be changed\n" })
   if $cf->get(qw(core dryrun));
 $log->logg({ pr => 'info', fm => "Config::Parse object as hash:\n%s",
-	     ls => [ $cf->as_hash ] }) if $v > 2;
+	     ls => [ $cf->as_hash ] }) if $v > 3;
 $log->logg({ pr => 'info', fm => "%s v.%s is starting ...",
 	     ls => [ $PROGNAM, $VERSION ] });
 
@@ -213,13 +213,13 @@ while ( $last_forever ) {
   }
 }
 
-closelog();
-
 $mesg = $ldap->unbind;
 if ( $mesg->code ) {
   $log->logg_ldap_err({ mesg => $mesg });
   exit $mesg->code;
 }
+
+closelog();
 
 exit 0;
 
@@ -412,7 +412,7 @@ sub ldap_search_callback {
 	  if ( ! -d $out_file_pfx ) {
 	    $log->logg({ pr => 'err', fm => "service %s, target directory %s doesn't exist",
 			 ls => [ $s, $out_file_pfx ] });
-	    next;
+	    return;
 	  } else {
 	    $out_file = sprintf("%s%s", $cf->get('service', $s, 'out_file'),
 				$cf->get('service', $s, 'out_ext') // '');
@@ -447,24 +447,29 @@ sub ldap_search_callback {
 	      foreach my $j ( $cf->names_of('service', $s, 'map', $i) ) {
 		if ( $i eq 's' && ! $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
 		  if ( $cf->get(qw(core dryrun)) ) {
-		    $log->logg({ pr => 'debug', fm => "DRYRUN: file %s should be deleted",
-				 ls => [ $dir . '/' . $out_file ] });
+		    $log->logg({ pr => 'debug', fm => "DRYRUN: %s to be deleted (no attribute: %s)",
+				 ls => [ $dir . '/' . $out_file,
+					 $cf->get('service', $s, 'map', $i, $j) ] });
 		  } else {
 		    if ( unlink $dir . '/' . $out_file ) {
-		      $log->logg({ pr => 'debug', fm => "file %s was successfully deleted",
-				   ls => [ $dir . '/' . $out_file ] })
+		      $log->logg({ pr => 'debug', fm => "file %s deleted (no attribute: %s)",
+				   ls => [ $dir . '/' . $out_file,
+					   $cf->get('service', $s, 'map', $i, $j) ] })
 			if $v > 0;
 		    } else {
-		      $log->logg({ pr => 'err', fm => "file %s was not removed; error: ",
-				   ls => [ $dir . '/' . $out_file, $! ] });
+		      $log->logg({ pr => 'err', fm => "%s not removed (no attribute: %s); error: ",
+				   ls => [ $cf->get('service', $s, 'map', $i, $j),
+					   $dir . '/' . $out_file, $! ] });
 		    }
 		  }
 
-		  ### if any of `map s` attributes doesn't exist, we
-		  ### delete that config file preliminaryly and skip
-		  ### that attribute from been processed by Template
+		  ### if any of `map s` attributes doesn't exist, we delete that config file
+		  ### preliminaryly and skip that attribute from been processed by Template
 		  next;
 
+		} elsif ( $i eq 'm' && $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
+		  $tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j),
+						    asref => 1 );
 		} else {
 		  if ( $j =~ /certificateRevocationList/ ) {
 		    $tt_vars->{$j} =
@@ -520,7 +525,7 @@ sub ldap_search_callback {
 				   $obj->get_value('gidNumber'),
 				   $dir . '/' . $out_file ] });
 	    }
-	    next;
+	    return;
 	  }
 
 	  my ( $tmp_fh, $tmp_fn );
@@ -528,7 +533,7 @@ sub ldap_search_callback {
 	  if ( $@ ) {
 	    $log->logg({ pr => 'err', fm => "File::Temp->new( DIR => %s ); service \"%s\"; err: \"%s\"",
 			 ls => [ $dir, $s, $@ ] });
-	    next;
+	    return;
 	  }
 	  $tmp_fn = $tmp_fh->filename;
 	  my $tt = Template->new( TRIM        => 1,
@@ -548,7 +553,7 @@ sub ldap_search_callback {
 			$tmp_fh ) || do {
 			  $log->logg({ pr => 'err', fm => "%s .tt process error: %s",
 				       ls => [ SYNST->[$st], $tt->error ] });
-			  next;
+			  return;
 			};
 
 	  close( $tmp_fh ) || do {
@@ -590,6 +595,9 @@ sub ldap_search_callback {
 			   ls => [ $dir . '/' . $out_file ] });
 	    }
 	  }
+	  $log->logg({ pr => 'debug', fm => "control %s: DN: %s processed successfully",
+		       ls => [ SYNST->[$st], $obj->dn ] });
+
 	} elsif ( $st == LDAP_SYNC_DELETE ) { ### >>>>>>>>> 2
 	  if ( $cf->get(qw(core dryrun)) ) {
 	    $log->logg({ pr => 'debug', fm => "DRYRUN: file %s should be deleted",
@@ -604,6 +612,8 @@ sub ldap_search_callback {
 			   ls => [ $dir . '/' . $out_file, $! ] });
 	    }
 	  }
+	  $log->logg({ pr => 'debug', fm => "control %s: DN: %s processed successfully",
+		       ls => [ SYNST->[$st], $obj->dn ] });
 	}
       } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
 	$log->logg({ pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $v > 1;

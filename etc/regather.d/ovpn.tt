@@ -27,16 +27,20 @@ ifconfig-push [% ifconfigpush %]
 
 [% IF iroute -%]
 [% FOREACH item IN iroute -%]
-[% IF item != 'NA' -%]iroute [% item %][% END -%]
+[% IF item != 'NA' -%]iroute [% item %]
 [% END -%]
 [% END -%]
+[% END -%]
+
 [% IF push -%]
 [% FOREACH item IN push -%]
 [% IF item != 'NA' -%]push "[% item %]"
 [% END -%]
 [% END -%]
 [% END -%]
+
 [% IF config && config != 'NA' -%]
 config [% config %]
 [% END -%]
 
+# END
