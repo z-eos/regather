@@ -31,6 +31,7 @@ use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_OPERATIONS_ERROR
 			    LDAP_LOCAL_ERROR );
 use Net::LDAP::Control::SyncRequest;
+use Net::LDAP::Util qw(generalizedTime_to_time);
 
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
@@ -38,22 +39,24 @@ my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
 our $VERSION    = '0.72';
 
-my $LL = [ qw( emerg alert crit err warning notice info debug ) ];
-my $ts_fmt = "%a %F %T %Z (%z)";
-
-our $v     = 0;
-our $fg    = 0;
-my $colors = 0;
-my $config = '/usr/local/etc/regather.conf';
+our $v      = 0;
+our $fg     = 0;
+our $force  = 0;
+our $strict = 0;
+my $colors  = 0;
+my $config  = '/usr/local/etc/regather.conf';
+my $ts_fmt  = "%a %F %T %Z (%z)";
 my $cli;
 my $ch;
 
 my $get_opt_res =
   GetOptions(
 	     'f|foreground' => \$fg,
+	     'F|force'     => \$force,
 	     'c|config=s'   => \$config,
 	     'colors'       => \$colors,
 	     'C|cli=s%'     => \$cli,
+	     'S|strict'     => \$strict,
 	     'config-help'  => \$ch,
 	     'v+'           => \$v,
 	     'h'            => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
@@ -70,7 +73,6 @@ $log->logg({ pr => 'info', fm => "options provided from CLI:\n%s", ls => [ $cli 
 my $cf = new Regather::Config ( filename  => $config,
 			        logger    => $log,
 				cli       => $cli,
-			        # add_nodes => { ldap_old => $ldap_opts },
 				verbose   => $v );
 
 if ( ! defined $cf ) {
@@ -120,20 +122,20 @@ foreach my $i ( @svc ) {
   }
 }
 
-my @sysattrs = qw( authorizedService
-		   description
-		   entryUUID
-		   entryCSN
-		   createTimestamp
-		   creatorsName
-		   modifiersName
-		   modifyTimestamp );
 @{$tmp}   = uniqstr @{$cfgattrs};
-$cfgattrs = [ @{$tmp}, @sysattrs, ];
+$cfgattrs = [ @{$tmp}, qw( authorizedService
+			   description
+			   entryUUID
+			   entryCSN
+			   createTimestamp
+			   creatorsName
+			   modifiersName
+			   modifyTimestamp ) ];
 
 #
 ## -=== MAIN LOOP =====================================================-
 #
+
 my $ldap_opt      = $cf->getnode(qw(ldap opt))->as_hash;
 my $uri           = delete $ldap_opt->{uri};
 our $last_forever = 1;
@@ -147,9 +149,14 @@ while ( $last_forever ) {
   }
 
   $ldap = Net::LDAP->new( $uri,
-			  @{[ map { $_ => $ldap_opt->{$_} } %$ldap_opt ]} ) || do {
-    print "\nUnable to connect to $cf->get(qw(ldap opt uri)): $!\n\n";
-    exit LDAP_CONNECT_ERROR;
+			  @{[ map { $_ => $ldap_opt->{$_} } %$ldap_opt ]} )
+    || do {
+      print "\nUnable to connect to ", $cf->get(qw(ldap opt uri)), ": $!\n";
+      if ( $strict ) {
+	exit LDAP_CONNECT_ERROR;
+      } else {
+	next;
+      }
   };
 
   my $start_tls_options = $cf->getnode(qw(ldap ssl))->as_hash if $cf->is_section(qw(ldap ssl));
@@ -161,7 +168,11 @@ while ( $last_forever ) {
     };
     if ( $@ ) {
       $log->logg({ pr => 'err', fm => "TLS negotiation failed: %s", ls => [ $! ] });
-      exit LDAP_CONNECT_ERROR;
+      if ( $strict ) {
+	exit LDAP_CONNECT_ERROR;
+      } else {
+	next;
+      }
     } else {
       $log->logg({ pr => 'info', fm => "TLS negotiation succeeded" }) if $v > 1;
     }
@@ -178,7 +189,11 @@ while ( $last_forever ) {
       $mesg = $ldap->bind( @bind_options );
       if ( $mesg->code ) {
 	$log->logg({ pr => 'err', fm => "bind error: %s", ls => [ $mesg->error ] });
-	exit $mesg->code;
+	if ( $strict ) {
+	  exit $mesg->code;
+	} else {
+	  next;
+	}
       }
     }
   }
@@ -202,7 +217,7 @@ while ( $last_forever ) {
 			'filter: ',       $cf->get(qw(ldap srch filter)),
 			'attrs: ',        join("\n", @{$cfgattrs}) ] });
     $log->logg_ldap_err({ mesg => $mesg });
-    exit $mesg->code;
+    exit $mesg->code if $strict;
   } else {
     $log->logg({ pr => 'info',
 		 fm => "LDAP search:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
@@ -494,6 +509,21 @@ sub ldap_search_callback {
 	  $tt_vars->{modifiedby} =
 	    ( split(/=/, ( split(/,/, $obj->get_value('modifiersName')) )[0]) )[1];
 
+	  if ( ! $force && -e $dir . '/' . $out_file &&
+	       ( generalizedTime_to_time($obj->get_value('modifyTimestamp'))
+		 <
+		 (stat($dir . '/' . $out_file))[9] ) ) {
+	    $log->logg({ pr => 'debug',
+	  		 fm => "skip. object %s is older than target file %s, (object modifyTimestamp: %s is older than file mtime: %s",
+	  		 ls => [ $obj->dn, $dir . '/' . $out_file,
+				 strftime( "%F %T",
+					   localtime(generalizedTime_to_time($obj->get_value('modifyTimestamp')))),
+				 strftime( "%F %T", localtime((stat($dir . '/' . $out_file))[9])),
+			       ] })
+	      if $v > 0;
+	    return;
+	  }
+
 	  ### PICKING ROOT OBJECT RDN (IN OUR CASE IT IS "UID")
 	  foreach ( reverse split(/,/, $obj->dn) ) {
 	    next if $_ !~ /^uid=/;
@@ -744,6 +774,16 @@ config file (mandatory)
 
 run in foreground (optional)
 
+=item B<-F | --forece>
+
+force re-generation of resources configured regardless existent file mtime and
+LDAP object modifiedTimestamp
+
+=item B<-S | --strict>
+
+exit on serverside LDAP errors (connection, server restart, etc). If
+not set, B<regather> will try connect infinetely. (default: not set)
+
 =item B<--colors>
 
 terminal colors are used in foreground debug output. (optional)
@@ -765,6 +805,10 @@ verbosity (optional, incremental)
 =item B<-h | --help>
 
 help page
+
+=item B<--version>
+
+shows version
 
 =back
 

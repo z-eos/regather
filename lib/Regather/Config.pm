@@ -311,7 +311,7 @@ sub mangle {
 		       new Text::Locus(sprintf("in \"%s\" ", $self->get(qw(core altroot))), 1)) ||
 			 exit 1;
       $self->{logger}->logg({ pr => 'debug', fm => "service %s out_path has been changed to %s",
-			      ls => [ $_, $self->get('service.' . $_ . '.out_path') ] })
+			      ls => [ $_, $self->get('service', $_, 'out_path') ] })
 	if $self->{verbose} > 1;
     }
   } else {
