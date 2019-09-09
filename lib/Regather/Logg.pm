@@ -9,6 +9,13 @@ use diagnostics;
 use Sys::Syslog qw(:standard :macros);
 use Data::Printer caller_info => 1, class => { expand => 2 };
 
+# https://upload.wikimedia.org/wikipedia/commons/1/15/Xterm_256color_chart.svg
+use constant dpc => { info    => 'ansi113',
+		      err     => 'bold ansi255 on_ansi196',
+		      debug   => 'ansi195', #grey18', #bright_yellow',
+		      warning => 'bold ansi237 on_ansi214', #bright_yellow',
+		    };
+
 sub new {
   my $class           = shift;
   local %_            = @_;
@@ -28,12 +35,10 @@ sub logg {
   my $arg = {
 	     fg   => $args->{fg} // $self->{foreground},
 	     pr   => $args->{pr} // 'info',
-	     pr_s => sprintf("%s|%s",
-			     $args->{pr}, $self->{facility} // 'local4'),
-	     pr_f => sprintf("%s:%s ",
-			     $self->{facility} // 'CONFIG FILE PARSE', $args->{pr}),
 	     fm   => $args->{fm},
 	    };
+  $arg->{pr_s} = sprintf("%s|%s", $arg->{pr}, $self->{facility} // 'local4');
+  $arg->{pr_f} = sprintf("%s: ", uc($arg->{pr}) );
 
   if ( exists $args->{ls} ) {
     @{$arg->{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ } @{$args->{ls}};
@@ -44,9 +49,10 @@ sub logg {
   if ( $arg->{fg} ) {
     $arg->{msg} = sprintf $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}};
     p($arg->{msg},
-      colored => $self->{colors} && $self->{foreground},
+      colored     => $self->{colors} && $self->{foreground},
       caller_info => 0,
-      output => 'stdout' );
+      color       => { string => dpc->{$arg->{pr}}},
+      output      => 'stdout' );
   } else {
     syslog( $arg->{pr_s}, $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}} );
   }

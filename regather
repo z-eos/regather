@@ -93,7 +93,7 @@ $log->logg({ pr => 'info', fm => "Dry Run is set on, no file is to be changed\n"
 $log->logg({ pr => 'info', fm => "Config::Parse object as hash:\n%s",
 	     ls => [ $cf->as_hash ] }) if $v > 3;
 $log->logg({ pr => 'info', fm => "%s v.%s is starting ...",
-	     ls => [ $PROGNAM, $VERSION ] });
+	     ls => [ $PROGNAM, $VERSION, ] });
 
 our @svc = grep { $cf->get('service', $_, 'skip') != 1 } $cf->names_of('service');
 
@@ -105,10 +105,10 @@ my $req = Net::LDAP::Control::SyncRequest->new( mode     => LDAP_SYNC_REFRESH_AN
 
 our $s;
 our $ldap;
-my $tmp;
+my  $tmp;
 our $cfgattrs = [];
-my $mesg;
-my @svc_map;
+my  $mesg;
+my  @svc_map;
 
 foreach my $i ( @svc ) {
   foreach ( qw( s m ) ) {
@@ -123,7 +123,8 @@ foreach my $i ( @svc ) {
 }
 
 @{$tmp}   = uniqstr @{$cfgattrs};
-$cfgattrs = [ @{$tmp}, qw( authorizedService
+$cfgattrs = [ @{$tmp}, qw( associatedDomain
+			   authorizedService
 			   description
 			   entryUUID
 			   entryCSN
@@ -142,8 +143,8 @@ our $last_forever = 1;
 while ( $last_forever ) {
   if ( $cf->is_set(qw(core altroot)) ) {
     chdir($cf->get(qw(core altroot))) || do {
-      $log->{logger}->logg({ pr => 'err', fm => "main: unable to chdir to %s",
-			     ls => [ $cf->get(qw(core altroot)) ] });
+      $log->logg({ pr => 'err', fm => "main: unable to chdir to %s",
+		   ls => [ $cf->get(qw(core altroot)) ] });
       exit 1;
     };
   }
@@ -151,7 +152,8 @@ while ( $last_forever ) {
   $ldap = Net::LDAP->new( $uri,
 			  @{[ map { $_ => $ldap_opt->{$_} } %$ldap_opt ]} )
     || do {
-      print "\nUnable to connect to ", $cf->get(qw(ldap opt uri)), ": $!\n";
+      $log->logg({ pr => 'err', fm => "Unable to connect to %s; error: %s",
+		   ls => [ $uri, $! ] });
       if ( $strict ) {
 	exit LDAP_CONNECT_ERROR;
       } else {
@@ -197,7 +199,6 @@ while ( $last_forever ) {
       }
     }
   }
-
 
   $mesg = $ldap->search( base     => $cf->get(qw(ldap srch base)),
 			 scope    => $cf->get(qw(ldap srch scope)),
@@ -331,7 +332,8 @@ sub ldap_search_callback {
 	$st = $syncstate->state;
 	my $ldif;
 	my %reqmod;
-	$log->logg({ pr => 'debug', fm => "control %s: DN: %s", ls => [ SYNST->[$st], $obj->dn ] });
+	$log->logg({ fm => "control %s: dn: %s",
+		     ls => [ SYNST->[$st], $obj->dn ] });
 
 	### LDAP_SYNC_DELETE arrives for both, object deletetion and attribute deletion
 	### in both cases Net::LDAP::Entry provided contains only DN, so, we need
@@ -344,12 +346,11 @@ sub ldap_search_callback {
 				    filter   => '(reqDN=' . $obj->dn . ')', );
 	  if ( $mesg->code ) {
 	    $log->logg({ pr => 'err',
-			 fm => "LDAP accesslog search on %s event error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			 ls => [
-				SYNST->[$st],
-				'base: ',         $cf->get(qw(ldap srch log_base)),
-				'scope: ',        'sub',
-				'filter: ',       '(reqDN=' . $obj->dn . ')' ] });
+			 fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			 ls => [ SYNST->[$st],
+				 'base: ',         $cf->get(qw(ldap srch log_base)),
+				 'scope: ',        'sub',
+				 'filter: ',       '(reqDN=' . $obj->dn . ')' ] });
 	    $log->logg_ldap_err({ mesg => $mesg });
 	    # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
 	  } else {
@@ -412,8 +413,8 @@ sub ldap_search_callback {
 	    if $obj->exists($cf->get('service', $_, 'ctrl_attr'));
 	}
 	if ( ! defined $s ) {
-	  $log->logg({ pr => 'debug',
-		       fm => "DN: %s is not configured to be processed on control: %s",
+	  $log->logg({ pr => 'warning',
+		       fm => "dn: %s is not configured to be processed on control: %s",
 		       ls => [ $obj->dn, SYNST->[$st] ] })
 	    if $v > 2;
 	  return;
@@ -566,7 +567,7 @@ sub ldap_search_callback {
 	    return;
 	  }
 	  $tmp_fn = $tmp_fh->filename;
-	  my $tt = Template->new( TRIM        => 1,
+	  my $tt = Template->new( TRIM        => $cf->get(qw(core tt_trim)),
 				  ABSOLUTE    => 1,
 				  RELATIVE    => 1,
 				  OUTPUT_PATH => $dir,

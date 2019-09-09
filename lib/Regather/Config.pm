@@ -526,6 +526,7 @@ gid          = STRING
 pid_file     = STRING :check=chk_dir_pid :default /var/run/openldap/regather.pid
 tt_debug     = NUMBER :default 0
 tt_path      = STRING :check=chk_dir :default /usr/local/etc/regather.d
+tt_trim      = NUMBER :default 0
 uid          = STRING
 
 [log]
