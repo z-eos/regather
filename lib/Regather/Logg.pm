@@ -148,6 +148,22 @@ STDOUT or syslog, default is: 0
 
 wheather to use terminal colors, default is: 0
 
+if set, then priorities are colored this way:
+
+=over 4
+
+info    => 'ansi113'
+
+err     => 'bold ansi255 on_ansi196'
+
+debug   => 'ansi195'
+
+warning => 'bold ansi237 on_ansi214'
+
+=back
+
+for reference look at L<Term::ANSIColor>
+
 =item ts_fmt =E<gt> 'strftime(3) format string'
 
 timestamp format string, default is: "%a %F %T %Z (%z)"
@@ -222,6 +238,7 @@ getter
 
 L<Sys::Syslog>,
 L<Data::Printer>,
+L<Term::ANSIColor>
 
 =head1 AUTHOR
 
