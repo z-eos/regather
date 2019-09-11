@@ -6,8 +6,11 @@ It uses Net::LDAP(3) to do all LDAP related stuff and Template(3) to generate fi
 
 As example, regather, on LDAP event can create/re-write/delete
 * OpenVPN client config file/s
-* CRL file for OpenVPN or FreeRADIUS
+* CRL file for OpenVPN or FreeRADIUS (in this case it is ca+crl pem file)
 * sieve script for mail user.
-* mail domain maildir directory in IMAP4 space, on domain binding to IMAP server LDAP configuration
+* mail domain maildir directory in IMAP4 space, on domain binding to IMAP server LDAP configuration (todo)
+* ...
+
+In theory it is possible to adopt regather to do anything you want by LDAP syncrepl event.
 
 Copyright (c) 2019 [Zeus Panchenko](https://github.com/z-eos)

@@ -37,7 +37,7 @@ use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDA
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-our $VERSION    = '0.72';
+our $VERSION    = '0.73';
 
 our $v      = 0;
 our $fg     = 0;
@@ -114,24 +114,24 @@ foreach my $i ( @svc ) {
   foreach ( qw( s m ) ) {
     if ( $cf->is_section('service', $i, 'map', $_) ) {
       @svc_map = values( %{ $cf->getnode('service', $i, 'map', $_)->as_hash } );
-      push @svc_map, $cf->getnode('service', $i, 'ctrl_attr');
-      $cfgattrs = [ @{$cfgattrs}, @svc_map ];
+      # push @svc_map, $cf->getnode('service', $i, 'ctrl_attr');
+      $cfgattrs = [ @{$cfgattrs}, @svc_map, @{$cf->get('service', $i, 'ctrl_attr')} ];
     } else {
       @svc_map = ();
     }
   }
 }
 
-@{$tmp}   = uniqstr @{$cfgattrs};
-$cfgattrs = [ @{$tmp}, qw( associatedDomain
-			   authorizedService
-			   description
-			   entryUUID
-			   entryCSN
-			   createTimestamp
-			   creatorsName
-			   modifiersName
-			   modifyTimestamp ) ];
+@{$tmp} = sort @{[ @{$cfgattrs}, qw( associatedDomain
+				     authorizedService
+				     description
+				     entryUUID
+				     entryCSN
+				     createTimestamp
+				     creatorsName
+				     modifiersName
+				     modifyTimestamp ) ]};
+@{$cfgattrs} = uniqstr @{$tmp};
 
 #
 ## -=== MAIN LOOP =====================================================-
@@ -328,7 +328,7 @@ sub ldap_search_callback {
       $rdn = ( split(/=/, ( split(/,/, $obj->dn) )[0]) )[0];
       if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
 	$log->logg({ pr => 'debug', fm => "SYNCSTATE:\n%s:", ls => [ $syncstate ] })
-	  if $v > 3;
+	  if $v > 4;
 	$st = $syncstate->state;
 	my $ldif;
 	my %reqmod;
@@ -408,10 +408,26 @@ sub ldap_search_callback {
 	  }
 	}
 
+
+	my $is_ctrl_attr;
+	my $ctrl_srv_re;
 	foreach ( @svc ) {
-	  $s = $_
-	    if $obj->exists($cf->get('service', $_, 'ctrl_attr'));
+	  $is_ctrl_attr = 0;
+	  foreach my $ctrl_attr ( @{$cf->get('service', $_, 'ctrl_attr')} ) {
+	    if ( $obj->exists( $ctrl_attr ) ) {
+	      $is_ctrl_attr++;
+	    } else {
+	      $is_ctrl_attr--;
+	    }
+	  }
+	  $ctrl_srv_re = $cf->get('service', $_, 'ctrl_srv_re');
+	  if ( $is_ctrl_attr > 0 &&
+	       $is_ctrl_attr == scalar( @{$cf->get('service', $_, 'ctrl_attr')} ) &&
+	       $obj->dn =~ qr/$ctrl_srv_re/ ) {
+	    $s = $_;
+	  }
 	}
+
 	if ( ! defined $s ) {
 	  $log->logg({ pr => 'warning',
 		       fm => "dn: %s is not configured to be processed on control: %s",
@@ -447,13 +463,15 @@ sub ldap_search_callback {
 
 	$log->logg({ pr => 'debug', fm => "output directory: %s; file: %s",
 		     ls => [ $dir, $out_file ] })	if $v > 2;
-	$log->logg({ pr => 'debug',
-		     fm => sprintf("SERVICE PREPROCESSING: % 8s; is-there-control-attribute( % 36s) = % 6s; DN: %s",
-				   $s,
-				   $cf->get('service', $s, 'ctrl_attr'),
-				   $obj->exists($cf->get('service', $s, 'ctrl_attr')) ? 'TRUE' : 'FALSE',
-				   $obj->dn) })
-	  if $v > 3;
+
+	# NEED TO AJUST TO ctrl_attr (array)
+	# $log->logg({ pr => 'debug',
+	# 	     fm => sprintf("SERVICE PREPROCESSING: % 8s; is-there-control-attribute( % 36s) = % 6s; DN: %s",
+	# 			   $s,
+	# 			   $cf->get('service', $s, 'ctrl_attr'),
+	# 			   $obj->exists($cf->get('service', $s, 'ctrl_attr')) ? 'TRUE' : 'FALSE',
+	# 			   $obj->dn) })
+	#   if $v > 3;
 
 	if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) { ### >>>>>>>>> 1
 
@@ -474,8 +492,9 @@ sub ldap_search_callback {
 			if $v > 0;
 		    } else {
 		      $log->logg({ pr => 'err', fm => "%s not removed (no attribute: %s); error: ",
-				   ls => [ $cf->get('service', $s, 'map', $i, $j),
-					   $dir . '/' . $out_file, $! ] });
+				   ls => [ $dir . '/' . $out_file,
+					   $cf->get('service', $s, 'map', $i, $j),
+					   $! ] });
 		    }
 		  }
 
@@ -490,6 +509,9 @@ sub ldap_search_callback {
 		  if ( $j =~ /certificateRevocationList/ ) {
 		    $tt_vars->{$j} =
 		      opensslize({ in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
+		  } elsif ( $j =~ /cACertificate/ ) {
+		    $tt_vars->{$j} =
+		      opensslize({ cmd => 'x509', in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
 		  } else {
 		    $tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) // 'NA';
 		  }
@@ -497,7 +519,6 @@ sub ldap_search_callback {
 	      }
 	    }
 	  }
-
 	  $tt_vars->{prog}       = sprintf("%s v.%s", $PROGNAM, $VERSION);
 	  $tt_vars->{DN}         = $obj->dn;
 	  $tt_vars->{date}       = strftime( $ts_fmt, localtime(time));

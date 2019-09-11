@@ -472,10 +472,23 @@ subsections) B<core>, B<ldap> and B<service>
 
 Each section can have mandatory options.
 
-Each I<service> must have the option I<ctrl_attr> which contains name
-of the attribute to check in event LDAP object. In case it is present,
-the object is considered to be processed, in case it is absent, we
-skip that event (since LDAP object has no I<ctrl_attr>)
+Each I<service> must have these options:
+
+=over 4
+
+1. at least one (can be set multiple times, and in that case all of
+them are checked) option I<ctrl_attr> which contains name of the
+attribute to check in event LDAP object. In case it is present, the
+object is considered to be processed, in case it is absent, we skip
+that event (since LDAP object has no I<ctrl_attr>)
+
+2. one I<ctrl_srv_re> option which is regular expression to match
+service against LDAP event object DN
+
+=back
+
+If both checks are positive, then object considered to be processed
+for that service.
 
 Each I<service> must have atleast one of two possible maps. Those maps
 are for mapping .tt variables to LDAP attributes values. Maps have
@@ -595,7 +608,8 @@ verify       = STRING
 [service ANY]
 chmod        = OCTAL  :default 0640
 chown	     = NUMBER :default 1
-ctrl_attr    = STRING :mandatory
+ctrl_attr    = STRING :mandatory :array
+ctrl_srv_re  = STRING :mandatory
 gid          = STRING
 out_ext      = STRING
 out_file     = STRING
