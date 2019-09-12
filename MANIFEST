@@ -1,5 +1,6 @@
 etc/regather.conf
-etc/regather.d/crl.tt
+etc/regather.d/crl-ovpn.tt
+etc/regather.d/crl-rad.tt
 etc/regather.d/ovpn.tt
 etc/regather.d/sieve.tt
 lib/Regather/Config.pm
