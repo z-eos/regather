@@ -78,7 +78,7 @@ Regather::Config - config file processing class
     				    verbose   => $v );
 
     if ( ! defined $cf ) {
-      $log->logg({ pr => 'err', fm => "do fix config file ..." });
+      $log->cc( pr => 'err', fm => "do fix config file ..." );
       pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
       exit 1;
     }
@@ -247,8 +247,8 @@ sub mangle {
   if ( $self->is_set(qw(core uid)) ) {
     $item = getpwnam( $self->get(qw(core uid)) );
     if ( defined $item ) {
-      $self->{logger}->logg({ pr => 'info', fm => "setuid user %s(%s) confirmed",
-			      ls => [ $self->get(qw(core uid)), $item ] })
+      $self->{logger}->cc( pr => 'info', fm => "setuid user %s(%s) confirmed",
+			   ls => [ $self->get(qw(core uid)), $item ] )
 	if $self->{verbose} > 1;
       $self->set('core', 'uid_number', $item);
     } else {
@@ -260,8 +260,8 @@ sub mangle {
   if ( $self->is_set(qw(core gid)) ) {
     $item = getgrnam( $self->get(qw(core gid)) );
     if ( defined $item ) {
-      $self->{logger}->logg({ pr => 'info', fm => "setgid group %s(%s) confirmed",
-			      ls => [ $self->get(qw(core gid)), $item ] })
+      $self->{logger}->cc( pr => 'info', fm => "setgid group %s(%s) confirmed",
+			   ls => [ $self->get(qw(core gid)), $item ] )
 	if $self->{verbose} > 1;
       $self->set('core', 'gid_number', $item);
     } else {
@@ -274,8 +274,8 @@ sub mangle {
     if ( $self->is_set(qw($_ uid)) ) {
       $item = getpwnam( $self->get(qw($_ uid)) );
       if ( defined $item ) {
-	$self->{logger}->logg({ pr => 'info', fm => "setuid user %s(%s) confirmed",
-				ls => [ $self->get(qw($_ uid)), $item ] })
+	$self->{logger}->cc( pr => 'info', fm => "setuid user %s(%s) confirmed",
+			     ls => [ $self->get(qw($_ uid)), $item ] )
 	  if $self->{verbose} > 1;
 	$self->set($_, 'uid_number', $item);
       } else {
@@ -287,8 +287,8 @@ sub mangle {
     if ( $self->is_set($_, 'gid') ) {
       $item = getgrnam( $self->get($_, 'gid') );
       if ( defined $item ) {
-	$self->{logger}->logg({ pr => 'info', fm => "setgid group %s(%s) confirmed",
-				ls => [ $self->get(qw($_ gid)), $item ] })
+	$self->{logger}->cc( pr => 'info', fm => "setgid group %s(%s) confirmed",
+			     ls => [ $self->get(qw($_ gid)), $item ] )
 	  if $self->{verbose} > 1;
 	$self->set($_, 'gid_number', $item);
       } else {
@@ -300,8 +300,8 @@ sub mangle {
 
   if ( $self->is_set(qw(core altroot)) ) {
     chdir($self->get(qw(core altroot))) || do {
-      $self->{logger}->logg({ pr => 'err', fm => "unable to chdir to %s",
-			      ls => [ $self->get(qw(core altroot)) ] });
+      $self->{logger}->cc( pr => 'err', fm => "unable to chdir to %s",
+			   ls => [ $self->get(qw(core altroot)) ] );
       exit 1;
     };
 
@@ -310,8 +310,8 @@ sub mangle {
 		       substr($self->get('service', $_, 'out_path'), 1),
 		       new Text::Locus(sprintf("in \"%s\" ", $self->get(qw(core altroot))), 1)) ||
 			 exit 1;
-      $self->{logger}->logg({ pr => 'debug', fm => "service %s out_path has been changed to %s",
-			      ls => [ $_, $self->get('service', $_, 'out_path') ] })
+      $self->{logger}->cc( pr => 'debug', fm => "service %s out_path has been changed to %s",
+			   ls => [ $_, $self->get('service', $_, 'out_path') ] )
 	if $self->{verbose} > 1;
     }
   } else {
@@ -359,8 +359,8 @@ sub config_help {
 
   if ( $self->{verbose} > 0 ) {
     print "\n\n";
-    $self->{logger}->logg({ fg => 1, pr => 'info', fm => "lexicon():%s\n%s",
-			    ls => [ '-' x 70, $lex ] });
+    $self->{logger}->cc( fg => 1, pr => 'info', fm => "lexicon():%s\n%s",
+			 ls => [ '-' x 70, $lex ] );
   }
 }
 
@@ -449,9 +449,9 @@ sub error {
   my $err  = shift;
   local %_ = @_;
   my $locus = $_{locus} ? $_{locus} . ': ' : '';
-  $self->{logger}->logg({ pr => 'err',
-			  fm => "config parser error: %s%s",
-			  ls => [ $locus, $err ] });
+  $self->{logger}->cc( pr => 'err',
+		       fm => "config parser error: %s%s",
+		       ls => [ $locus, $err ] );
 }
 
 

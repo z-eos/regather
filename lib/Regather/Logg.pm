@@ -30,42 +30,44 @@ sub new {
   $self
 }
 
-sub logg {
-  my ( $self, $args ) = @_;
-  my $arg = {
-	     fg   => $args->{fg} // $self->{foreground},
-	     pr   => $args->{pr} // 'info',
-	     fm   => $args->{fm},
-	    };
-  $arg->{pr_s} = sprintf("%s|%s", $arg->{pr}, $self->{facility} // 'local4');
-  $arg->{pr_f} = sprintf("%s: ", uc($arg->{pr}) );
+sub conclude {
+  my ( $self, %args ) = @_;
+  my %arg = ( fg => $args{fg} // $self->{foreground},
+	      pr => $args{pr} // 'info',
+	      fm => $args{fm}, );
+  $arg{pr_s} = sprintf("%s|%s", $arg{pr}, $self->{facility} // 'local4');
+  $arg{pr_f} = sprintf("%s: ", uc($arg{pr}) );
 
-  if ( exists $args->{ls} ) {
-    @{$arg->{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ } @{$args->{ls}};
+  if ( exists $args{ls} ) {
+    @{$arg{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ } @{$args{ls}};
   } else {
-    $arg->{ls} = [];
+    $arg{ls} = [];
   }
 
-  if ( $arg->{fg} ) {
-    $arg->{msg} = sprintf $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}};
-    p($arg->{msg},
+  if ( $arg{fg} ) {
+    $arg{msg} = sprintf $arg{pr_f} . $arg{fm}, @{$arg{ls}};
+    p($arg{msg},
       colored     => $self->{colors} && $self->{foreground},
       caller_info => 0,
-      color       => { string => dpc->{$arg->{pr}}},
+      color       => { string => dpc->{$arg{pr}}},
       output      => 'stdout' );
   } else {
-    syslog( $arg->{pr_s}, $arg->{pr_f} . $arg->{fm}, @{$arg->{ls}} );
+    syslog( $arg{pr_s}, $arg{pr_f} . $arg{fm}, @{$arg{ls}} );
   }
 }
 
-sub logg_ldap_err {
-  my ( $self, $args ) = @_;
-  $self->logg({ pr => 'err', fm => "LDAP ERROR:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		ls => [ 'ERROR: ',        $args->{mesg}->error_name,
-			'TEXT: ',         $args->{mesg}->error_text,
-			'DESCRIPTION: ',  $args->{mesg}->error_desc,
-			'SERVER ERROR: ', $args->{mesg}->server_error ] });
+sub cc { goto &conclude }
+
+sub conclude_ldap_err {
+  my ( $self, %args ) = @_;
+  $self->cc( pr => 'err', fm => "LDAP ERROR:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+	     ls => [ 'ERROR: ',        $args{mesg}->error_name,
+		     'TEXT: ',         $args{mesg}->error_text,
+		     'DESCRIPTION: ',  $args{mesg}->error_desc,
+		     'SERVER ERROR: ', $args{mesg}->server_error ] );
 }
+
+sub cc_ldap_err { goto &conclude_ldap_err }
 
 sub set_m {
   my ( $self, $cf ) = @_;
@@ -75,8 +77,8 @@ sub set_m {
       $self->{$k} = $v;
     }
   } else {
-    $self->logg({ pr => 'err',
-		  fm => "Logg::set_m(): argument supplied is not HASH ..." });
+    $self->cc( pr => 'err',
+	       fm => "Logg::set_m(): argument supplied is not HASH ..." );
     return 0;
   }
 }
@@ -91,9 +93,9 @@ sub get {
   if ( exists $self->{$k} ) {
     $self->{$k};
   } else {
-    $self->logg({ pr => 'err',
-		  fm => "attribute \"%s\" doesn't exist",
-		  ls => [ $k ] });
+    $self->cc( pr => 'err',
+	       fm => "attribute \"%s\" doesn't exist",
+	       ls => [ $k ] );
     return;
   }
 }
@@ -116,11 +118,11 @@ Regather::Logg - logging class
     my $log = new Regather::Logg( prognam    => 'MyAppName',
 			          foreground => $foreground_or_syslog,
 			          colors     => $wheather_to_use_term_colors );
-    $log->logg({ pr => 'info', fm => "Regather::Logg initialized ... (write to syslog)" });
-    $log->logg({ fg => 1, fm => "Regather::Logg initialized ... (write to STDOUT)" });
+    $log->cc( pr => 'info', fm => "Regather::Logg initialized ... (write to syslog)" );
+    $log->cc( fg => 1, fm => "Regather::Logg initialized ... (write to STDOUT)" );
     ...
     my $mesg = $ldap->search( filter => "(objectClass=unsearchebleThing)");
-    $log->logg_ldap_err({ mesg => $mesg });
+    $log->logg_ldap_err( mesg => $mesg );
 
 =head1 DESCRIPTION
 

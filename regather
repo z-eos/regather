@@ -65,9 +65,9 @@ my $get_opt_res =
 my $log = new Regather::Logg( prognam    => $PROGNAM,
 			      foreground => $fg,
 			      colors     => $colors );
-$log->logg({ pr => 'info', fm => "Regather::Logg initialized ..." }) if $v > 1;
+$log->cc( pr => 'info', fm => "Regather::Logg initialized ..." ) if $v > 1;
 
-$log->logg({ pr => 'info', fm => "options provided from CLI:\n%s", ls => [ $cli ] })
+$log->cc( pr => 'info', fm => "options provided from CLI:\n%s", ls => [ $cli ] )
   if keys( %{$cli} ) && $v > 1;
 
 my $cf = new Regather::Config ( filename  => $config,
@@ -76,7 +76,7 @@ my $cf = new Regather::Config ( filename  => $config,
 				verbose   => $v );
 
 if ( ! defined $cf ) {
-  $log->logg({ pr => 'err', fm => "do fix config file ..." });
+  $log->cc( pr => 'err', fm => "do fix config file ..." );
   pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
   exit 1;
 }
@@ -88,23 +88,20 @@ if ( $ch ) {
 
 $log->set_m( $cf->getnode('log')->as_hash );
 
-$log->logg({ pr => 'info', fm => "Dry Run is set on, no file is to be changed\n" })
+$log->cc( pr => 'info', fm => "Dry Run is set on, no file is to be changed\n" )
   if $cf->get(qw(core dryrun));
-$log->logg({ pr => 'info', fm => "Config::Parse object as hash:\n%s",
-	     ls => [ $cf->as_hash ] }) if $v > 3;
-$log->logg({ pr => 'info', fm => "%s v.%s is starting ...",
-	     ls => [ $PROGNAM, $VERSION, ] });
+$log->cc( pr => 'info', fm => "Config::Parse object as hash:\n%s",
+	  ls => [ $cf->as_hash ] ) if $v > 3;
+$log->cc( pr => 'info', fm => "%s v.%s is starting ...",
+	  ls => [ $PROGNAM, $VERSION, ] );
 
 our @svc = grep { $cf->get('service', $_, 'skip') != 1 } $cf->names_of('service');
 
 daemonize() if ! $fg;
 
-my $req = Net::LDAP::Control::SyncRequest->new( mode     => LDAP_SYNC_REFRESH_AND_PERSIST,
-						critical => 1,
-						cookie   => undef, );
-
 our $s;
 our $ldap;
+my  $req;
 my  $tmp;
 our $cfgattrs = [];
 my  $mesg;
@@ -143,8 +140,8 @@ our $last_forever = 1;
 while ( $last_forever ) {
   if ( $cf->is_set(qw(core altroot)) ) {
     chdir($cf->get(qw(core altroot))) || do {
-      $log->logg({ pr => 'err', fm => "main: unable to chdir to %s",
-		   ls => [ $cf->get(qw(core altroot)) ] });
+      $log->cc( pr => 'err', fm => "main: unable to chdir to %s",
+		ls => [ $cf->get(qw(core altroot)) ] );
       exit 1;
     };
   }
@@ -152,14 +149,14 @@ while ( $last_forever ) {
   $ldap = Net::LDAP->new( $uri,
 			  @{[ map { $_ => $ldap_opt->{$_} } %$ldap_opt ]} )
     || do {
-      $log->logg({ pr => 'err', fm => "Unable to connect to %s; error: %s",
-		   ls => [ $uri, $! ] });
+      $log->cc( pr => 'err', fm => "Unable to connect to %s; error: %s",
+		ls => [ $uri, $! ] );
       if ( $strict ) {
 	exit LDAP_CONNECT_ERROR;
       } else {
 	next;
       }
-  };
+    };
 
   my $start_tls_options = $cf->getnode(qw(ldap ssl))->as_hash if $cf->is_section(qw(ldap ssl));
   if ( exists $start_tls_options->{ssl} && $start_tls_options->{ssl} eq 'start_tls' ) {
@@ -169,14 +166,14 @@ while ( $last_forever ) {
 	$ldap->start_tls( @{[ map { $_ => $start_tls_options->{$_} } %$start_tls_options ]} );
     };
     if ( $@ ) {
-      $log->logg({ pr => 'err', fm => "TLS negotiation failed: %s", ls => [ $! ] });
+      $log->cc( pr => 'err', fm => "TLS negotiation failed: %s", ls => [ $! ] );
       if ( $strict ) {
 	exit LDAP_CONNECT_ERROR;
       } else {
 	next;
       }
     } else {
-      $log->logg({ pr => 'info', fm => "TLS negotiation succeeded" }) if $v > 1;
+      $log->cc( pr => 'info', fm => "TLS negotiation succeeded" ) if $v > 1;
     }
   }
 
@@ -190,7 +187,7 @@ while ( $last_forever ) {
       }
       $mesg = $ldap->bind( @bind_options );
       if ( $mesg->code ) {
-	$log->logg({ pr => 'err', fm => "bind error: %s", ls => [ $mesg->error ] });
+	$log->cc( pr => 'err', fm => "bind error: %s", ls => [ $mesg->error ] );
 	if ( $strict ) {
 	  exit $mesg->code;
 	} else {
@@ -199,6 +196,10 @@ while ( $last_forever ) {
       }
     }
   }
+
+  $req = Net::LDAP::Control::SyncRequest->new( mode     => LDAP_SYNC_REFRESH_AND_PERSIST,
+					       critical => 1,
+					       cookie   => undef, );
 
   $mesg = $ldap->search( base     => $cf->get(qw(ldap srch base)),
 			 scope    => $cf->get(qw(ldap srch scope)),
@@ -210,28 +211,28 @@ while ( $last_forever ) {
 			 timelimit=> $cf->get(qw(ldap srch timelimit)),
 		       );
   if ( $mesg->code ) {
-    $log->logg({ pr => 'err',
-		 fm => "LDAP search ERROR...\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		 ls => [
-			'base: ',         $cf->get(qw(ldap srch base)),
-			'scope: ',        $cf->get(qw(ldap srch scope)),
-			'filter: ',       $cf->get(qw(ldap srch filter)),
-			'attrs: ',        join("\n", @{$cfgattrs}) ] });
-    $log->logg_ldap_err({ mesg => $mesg });
+    $log->cc( pr => 'err',
+	      fm => "LDAP search ERROR...\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+	      ls => [
+		     'base: ',         $cf->get(qw(ldap srch base)),
+		     'scope: ',        $cf->get(qw(ldap srch scope)),
+		     'filter: ',       $cf->get(qw(ldap srch filter)),
+		     'attrs: ',        join("\n", @{$cfgattrs}) ] );
+    $log->cc_ldap_err( mesg => $mesg );
     exit $mesg->code if $strict;
   } else {
-    $log->logg({ pr => 'info',
-		 fm => "LDAP search:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		 ls => [ 'base: ',   $cf->get(qw(ldap srch base)),
-			 'scope: ',  $cf->get(qw(ldap srch scope)),
-			 'filter: ', $cf->get(qw(ldap srch filter)),
-			 'attrs: ',  join("\n", @{$cfgattrs}) ] }) if $v > 2;
+    $log->cc( pr => 'info',
+	      fm => "LDAP search:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+	      ls => [ 'base: ',   $cf->get(qw(ldap srch base)),
+		      'scope: ',  $cf->get(qw(ldap srch scope)),
+		      'filter: ', $cf->get(qw(ldap srch filter)),
+		      'attrs: ',  join("\n", @{$cfgattrs}) ] ) if $v > 2;
   }
 }
 
 $mesg = $ldap->unbind;
 if ( $mesg->code ) {
-  $log->logg_ldap_err({ mesg => $mesg });
+  $log->cc_ldap_err( mesg => $mesg );
   exit $mesg->code;
 }
 
@@ -263,12 +264,12 @@ sub daemonize {
 
     $orphaned_pid_mtime = strftime( $ts_fmt, localtime( (stat( $cf->get(qw(core pid_file)) ))[9] ));
     if ( unlink $cf->get(qw(core pid_file)) ) {
-      $log->logg({ pr => 'debug', fm => "orphaned %s was removed",
-	     ls => [ $cf->get(qw(core pid_file)) ] })
+      $log->cc( pr => 'debug', fm => "orphaned %s was removed",
+		ls => [ $cf->get(qw(core pid_file)) ] )
 	if $v > 0;
     } else {
-      $log->logg({ pr => 'err', fm => "orphaned %s (mtime: %s) was not removed: %s",
-	     ls => [ $cf->get(qw(core pid_file)), $orphaned_pid_mtime, $! ] });
+      $log->cc( pr => 'err', fm => "orphaned %s (mtime: %s) was not removed: %s",
+		ls => [ $cf->get(qw(core pid_file)), $orphaned_pid_mtime, $! ] );
       exit 2;
     }
 
@@ -294,22 +295,22 @@ sub daemonize {
   }
 
   $SIG{HUP}  = sub { my $sig = @_;
-		     $log->logg({ pr => 'warning', fm => "SIG $sig received, restarting" });
+		     $log->cc( pr => 'warning', fm => "SIG $sig received, restarting" );
 		     exec('perl', @DAEMONARGS); };
   $SIG{INT} = $SIG{QUIT} = $SIG{ABRT} = $SIG{TERM} =
     sub { my $sig = @_;
-	  $log->logg({ pr => 'warning', fm => " SIG $sig received, exiting" });
+	  $log->cc( pr => 'warning', fm => " SIG $sig received, exiting" );
 	  $last_forever = 0;};
   $SIG{PIPE} = 'ignore';
   $SIG{USR1} = sub { my $sig = @_;
-		     $log->logg({ pr => 'warning', fm => "SIG $sig received, doing nothing" }) };
+		     $log->cc( pr => 'warning', fm => "SIG $sig received, doing nothing" ) };
 
   if ( $cf->is_set(qw(core uid)) && $cf->is_set(qw(core gid)) ) {
     setgid ( $cf->get(qw(core gid_number)) ) || do { print "setgid went wrong: $!\n\n"; exit 1; };
     setuid ( $cf->get(qw(core uid_number)) ) || do { print "setuid went wrong: $!\n\n"; exit 1; };
   }
 
-  $log->logg({ pr => 'info', fm => "%s v.%s is started.", ls => [ $PROGNAM, $VERSION ] });
+  $log->cc( pr => 'info', fm => "%s v.%s is started.", ls => [ $PROGNAM, $VERSION ] );
 }
 
 sub ldap_search_callback {
@@ -318,371 +319,454 @@ sub ldap_search_callback {
   my @controls = $msg->control;
   my $syncstate = scalar @controls ? $controls[0] : undef;
 
-  my ( $s, $st, $tt_vars, $map, $out_file_pfx, $out_file, $tmp_debug_msg, $rdn, $dir );
+  my ( $s, $st, $mesg, $entry, @entries, $ldif, $tt_vars, $map,
+       %out_paths, $out_file_pfx, $out_file, $out_file_pfx_old, $out_file_old,
+       $tmp_debug_msg,
+       $rdn, $rdn_old, $rdn_re,
+       $dir );
 
-  $log->logg({ pr => 'debug', fm => "syncstate: %s", ls => [ $syncstate ] })
-    if $v > 4;
-  $log->logg({ pr => 'debug', fm => "object: %s", ls => [ $obj ] }) if $v > 4;
+  $log->cc( pr => 'debug', fm => "syncstate: %s", ls => [ $syncstate ] )
+    if $v > 5;
+  $log->cc( pr => 'debug', fm => "object: %s", ls => [ $obj ] ) if $v > 5;
 
   if ( defined $obj && $obj->isa('Net::LDAP::Entry') ) {
-      $rdn = ( split(/=/, ( split(/,/, $obj->dn) )[0]) )[0];
-      if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
-	$log->logg({ pr => 'debug', fm => "SYNCSTATE:\n%s:", ls => [ $syncstate ] })
-	  if $v > 4;
-	$st = $syncstate->state;
-	my $ldif;
-	my %reqmod;
-	$log->logg({ fm => "control %s: dn: %s",
-		     ls => [ SYNST->[$st], $obj->dn ] });
+    $rdn = ( split(/=/, ( split(/,/, $obj->dn) )[0]) )[0];
+    if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
+      $log->cc( pr => 'debug', fm => "SYNCSTATE:\n%s:", ls => [ $syncstate ] )
+	if $v > 4;
+      $st = $syncstate->state;
+      my %reqmod;
+      $log->cc( fm => "received control %s: dn: %s", ls => [ SYNST->[$st], $obj->dn ] );
 
-	### LDAP_SYNC_DELETE arrives for both, object deletetion and attribute deletion
-	### in both cases Net::LDAP::Entry provided contains only DN, so, we need
-	### to "re-construct" it for further processing
-	if ( $st == LDAP_SYNC_DELETE ) {
-	  my $mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
-				    scope    => 'sub',
-				    sizelimit=> $cf->get(qw(ldap srch sizelimit)),
-				    timelimit=> $cf->get(qw(ldap srch timelimit)),
-				    filter   => '(reqDN=' . $obj->dn . ')', );
-	  if ( $mesg->code ) {
-	    $log->logg({ pr => 'err',
-			 fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			 ls => [ SYNST->[$st],
-				 'base: ',         $cf->get(qw(ldap srch log_base)),
-				 'scope: ',        'sub',
-				 'filter: ',       '(reqDN=' . $obj->dn . ')' ] });
-	    $log->logg_ldap_err({ mesg => $mesg });
-	    # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
+      ### discovering a service, $obj relates to
+      my $is_ctrl_attr;
+      my $ctrl_srv_re;
+      foreach ( @svc ) {
+	$is_ctrl_attr = 0;
+	foreach my $ctrl_attr ( @{$cf->get('service', $_, 'ctrl_attr')} ) {
+	  if ( $obj->exists( $ctrl_attr ) ) {
+	    $is_ctrl_attr++;
 	  } else {
-	    my $entry = pop @{[$mesg->sorted]};
-
-	    if ( $entry->get_value('reqType') eq 'delete' ) {
-	      my $reqold = 'dn: ' . $obj->dn;
-	      foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
-		s/^(.*;binary:) .*$/$1: c3R1Yg==/agis;
-		$reqold .= "\n" . $_;
-	      }
-	      my ( $file, @err );
-	      open( $file, "<", \$reqold) ||
-		$log->logg({ pr => 'err',
-			     fm => "Cannot open data from variable to rad ldif: %s",
-			     ls => [ $! ] });
-	      $ldif = Net::LDAP::LDIF->new( $file, "r", onerror => 'warn' );
-	      while ( not $ldif->eof ) {
-		$entry = $ldif->read_entry;
-		$log->logg({ pr => 'err', fm => "Reading LDIF error: %s",
-			     ls => [ $ldif->error ] }) if $ldif->error;
-	      }
-	      $obj = $entry;
-	      $ldif->done;
-	    } elsif ( $entry->get_value('reqType') eq 'modify' ) {
-	      ### here we re-assemble $obj to have all attributes before deletion
-	      ### and since after that it'll has ctrl_attr but reqType=delete,
-	      ### it'll go to $st == LDAP_SYNC_DELETE
-	      %reqmod =
-		map  { substr($_, 0, -2) => 1 }
-		grep { /^(.*):-$/g }
-		@{$entry->get_value('reqMod', asref => 1)};
-
-	      my $mesg = $ldap->search( base   => $obj->dn,
-					scope  => 'base',
-					filter => '(objectClass=*)', );
-	      if ( $mesg->code ) {
-		$log->logg({ pr => 'err',
-			     fm => "LDAP search %s %s error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			     ls => [
-				    SYNST->[$st],     'reqType=modify',
-				    'base: ',         $cf->get(qw(ldap srch log_base)),
-				    'scope: ',        'sub',
-				    'filter: ',       '(reqDN=' . $obj->dn . ')' ] });
-		$log->logg_ldap_err({ mesg => $mesg });
-		# exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
-	      } else {
-		$obj = $mesg->entry(0);
-		$obj->add( map { $_ => $reqmod{$_} } keys %reqmod );
-		# $obj->add( $_ => $reqmod{$_} ) foreach ( keys %reqmod );
-	      }
-	      $log->logg({ pr => 'debug', fm => "%s reqType=modify reqMod: %s",
-			   ls => [ SYNST->[$st], \%reqmod ] })	if $v > 3;
-	    }
+	    $is_ctrl_attr--;
 	  }
 	}
+	$ctrl_srv_re = $cf->get('service', $_, 'ctrl_srv_re');
+	if ( $is_ctrl_attr > 0 &&
+	     $is_ctrl_attr == scalar( @{$cf->get('service', $_, 'ctrl_attr')} ) &&
+	     $obj->dn =~ qr/$ctrl_srv_re/ ) {
+	  $s = $_;
+	}
+      }
 
+      ### LDAP_SYNC_DELETE arrives for both cases, object deletetion
+      ### and attribute deletion and in both cases Net::LDAP::Entry
+      ### provided contains only DN, so, we need to "re-construct"
+      ### it for further processing
+      if ( $st == LDAP_SYNC_DELETE ) {
+	$mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
+			       scope    => 'sub',
+			       sizelimit=> $cf->get(qw(ldap srch sizelimit)),
+			       timelimit=> $cf->get(qw(ldap srch timelimit)),
+			       filter   => '(reqDN=' . $obj->dn . ')', );
+	if ( $mesg->code ) {
+	  $log->cc( pr => 'err',
+		    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		    ls => [ SYNST->[$st],
+			    'base: ',   $cf->get(qw(ldap srch log_base)),
+			    'scope: ',  'sub',
+			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
+	  $log->cc_ldap_err( mesg => $mesg );
+	  # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
+	} else {
+	  $entry = pop @{[$mesg->sorted]};
 
-	my $is_ctrl_attr;
-	my $ctrl_srv_re;
-	foreach ( @svc ) {
-	  $is_ctrl_attr = 0;
-	  foreach my $ctrl_attr ( @{$cf->get('service', $_, 'ctrl_attr')} ) {
-	    if ( $obj->exists( $ctrl_attr ) ) {
-	      $is_ctrl_attr++;
+	  if ( $entry->get_value('reqType') eq 'delete' ) {
+	    my $reqold = 'dn: ' . $obj->dn;
+	    foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
+	      s/^(.*;binary:) .*$/$1: c3R1Yg==/agis;
+	      $reqold .= "\n" . $_;
+	    }
+	    my ( $file, @err );
+	    open( $file, "<", \$reqold) ||
+	      $log->cc( pr => 'err',
+			fm => "Cannot open data from variable to read ldif: %s",
+			ls => [ $! ] );
+	    $ldif = Net::LDAP::LDIF->new( $file, "r", onerror => 'warn' );
+	    while ( not $ldif->eof ) {
+	      $entry = $ldif->read_entry;
+	      $log->cc( pr => 'err', fm => "Reading LDIF error: %s",
+			ls => [ $ldif->error ] ) if $ldif->error;
+	    }
+	    $obj = $entry;
+	    $ldif->done;
+	  } elsif ( $entry->get_value('reqType') eq 'modify' ) {
+	    ### here we re-assemble $obj to have all attributes before deletion
+	    ### and since after that it'll has ctrl_attr but reqType=delete,
+	    ### it'll go to $st == LDAP_SYNC_DELETE
+	    %reqmod = map  { substr($_, 0, -2) => 1 } grep { /^(.*):-$/g }
+	      @{$entry->get_value('reqMod', asref => 1)};
+
+	    $mesg = $ldap->search( base   => $obj->dn,
+				   scope  => 'base',
+				   filter => '(objectClass=*)', );
+	    if ( $mesg->code ) {
+	      $log->cc( pr => 'err',
+			fm => "LDAP search %s %s error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			ls => [
+			       SYNST->[$st], 'reqType=modify',
+			       'base: ',     $cf->get(qw(ldap srch log_base)),
+			       'scope: ',    'sub',
+			       'filter: ',   '(reqDN=' . $obj->dn . ')' ] );
+	      $log->cc_ldap_err( mesg => $mesg );
+	      # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
 	    } else {
-	      $is_ctrl_attr--;
+	      $obj = $mesg->entry(0);
+	      $obj->add( map { $_ => $reqmod{$_} } keys %reqmod );
+	      # $obj->add( $_ => $reqmod{$_} ) foreach ( keys %reqmod );
+	    }
+	    $log->cc( pr => 'debug', fm => "%s reqType=modify reqMod: %s",
+		      ls => [ SYNST->[$st], \%reqmod ] )	if $v > 3;
+	  }
+	}
+      } elsif ( $st == LDAP_SYNC_MODIFY ) {
+	$mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
+			       scope    => 'sub',
+			       sizelimit=> $cf->get(qw(ldap srch sizelimit)),
+			       timelimit=> $cf->get(qw(ldap srch timelimit)),
+			       filter   => '(reqDN=' . $obj->dn . ')', );
+	if ( $mesg->code ) {
+	  $log->cc( pr => 'err',
+		    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		    ls => [ SYNST->[$st],
+			    'base: ',   $cf->get(qw(ldap srch log_base)),
+			    'scope: ',  'sub',
+			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
+	  $log->cc_ldap_err( mesg => $mesg );
+	} else {
+	  ### if modified object has no accesslog records, it means it was ModRDN-ed
+	  ### so, we search for accesslog object with reqNewRDN=<$obj->dn RDN> to know
+	  ### old object RDN to use it further for $out_file
+	  if ( $mesg->count == 0 ) {
+	    $mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
+				   scope    => 'sub',
+				   sizelimit=> $cf->get(qw(ldap srch sizelimit)),
+				   timelimit=> $cf->get(qw(ldap srch timelimit)),
+				   filter   => '(reqNewRDN=' . (split(/,/, $obj->dn))[0] . ')', );
+	    if ( $mesg->code ) {
+	      $log->cc( pr => 'err',
+			fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			ls => [ SYNST->[$st],
+				'base: ',   $cf->get(qw(ldap srch log_base)),
+				'scope: ',  'sub',
+				'filter: ', '(reqNewRDN=' . (split(/,/, $obj->dn))[0] . ')' ] );
+	      $log->cc_ldap_err( mesg => $mesg );
+	      # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
+	    } else {
+	      $entry = $mesg->entry(0);
+	      $rdn_re = qr/^$rdn: .*$/;
+	      foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
+		$rdn_old = (split(/: /, $_))[1] if /$rdn_re/;
+	      }
+	      %out_paths = out_paths( cf => $cf, obj => $obj, s => $s,
+				      rdn => $rdn, rdn_val => $rdn_old );
+	      return if ! %out_paths;
+	      $out_file_pfx_old = $out_paths{out_file_pfx} if exists $out_paths{out_file_pfx};
+	      $out_file_old     = $out_paths{out_file}     if exists $out_paths{out_file};
 	    }
 	  }
-	  $ctrl_srv_re = $cf->get('service', $_, 'ctrl_srv_re');
-	  if ( $is_ctrl_attr > 0 &&
-	       $is_ctrl_attr == scalar( @{$cf->get('service', $_, 'ctrl_attr')} ) &&
-	       $obj->dn =~ qr/$ctrl_srv_re/ ) {
-	    $s = $_;
-	  }
 	}
+      }
 
-	if ( ! defined $s ) {
-	  $log->logg({ pr => 'warning',
-		       fm => "dn: %s is not configured to be processed on control: %s",
-		       ls => [ $obj->dn, SYNST->[$st] ] })
-	    if $v > 2;
-	  return;
-	}
+      if ( ! defined $s ) {
+	$log->cc( pr => 'warning',
+		  fm => "dn: %s is not configured to be processed on control: %s",
+		  ls => [ $obj->dn, SYNST->[$st] ] )
+	  if $v > 2;
+	return;
+      }
 
-	### PREPARING OUTPUT RELATED VARIABLES
-	if ( $cf->is_set('service', $s, 'out_file_pfx') &&
-	     $cf->is_set('service', $s, 'out_file') ) {
-	  $out_file_pfx = $obj->get_value($cf->get('service', $s, 'out_file_pfx'));
-	  $out_file_pfx = substr($out_file_pfx, 1) if $cf->is_set(qw(core altroot));
-	  if ( ! -d $out_file_pfx ) {
-	    $log->logg({ pr => 'err', fm => "service %s, target directory %s doesn't exist",
-			 ls => [ $s, $out_file_pfx ] });
-	    return;
+      ### PREPARING OUTPUT RELATED VARIABLES
+      %out_paths = out_paths( cf => $cf, obj => $obj, s => $s, rdn => $rdn );
+      return if ! %out_paths;
+      $out_file_pfx = $out_paths{out_file_pfx} if exists $out_paths{out_file_pfx};
+      $out_file     = $out_paths{out_file}     if exists $out_paths{out_file};
+
+      $dir = $out_file_pfx // $cf->get('service', $s, 'out_path');
+
+      $log->cc( pr => 'debug', fm => "output directory: %s; file: %s",
+		ls => [ $dir, $out_file ] )	if $v > 2;
+
+      # NEED TO AJUST TO ctrl_attr array topology
+      # $log->cc( pr => 'debug',
+      # 	     fm => sprintf("SERVICE PREPROCESSING: % 8s; is-there-control-attribute( % 36s) = % 6s; DN: %s",
+      # 			   $s,
+      # 			   $cf->get('service', $s, 'ctrl_attr'),
+      # 			   $obj->exists($cf->get('service', $s, 'ctrl_attr')) ? 'TRUE' : 'FALSE',
+      # 			   $obj->dn) )
+      #   if $v > 3;
+
+      #@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
+      #@#@#@#@#@#@# >>>>>>>>> 1
+      #@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
+      if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
+
+	if ( defined $out_file_old ) {
+	  if ( unlink $dir . '/' . $out_file_old ) {
+	    $log->cc( pr => 'info', fm => "file %s deleted (after ModRDN)",
+		      ls => [ $dir . '/' . $out_file_old ] );
 	  } else {
-	    $out_file = sprintf("%s%s", $cf->get('service', $s, 'out_file'),
-				$cf->get('service', $s, 'out_ext') // '');
+	    $log->cc( pr => 'err', fm => "%s not removed (after ModRDN); error: %s",
+		      ls => [ $dir . '/' . $out_file_old, $! ] );
 	  }
-	} elsif ( ! $cf->is_set('service', $s, 'out_file_pfx') &&
-		  $cf->is_set('service', $s, 'out_file')) {
-	  $out_file = sprintf("%s%s", $cf->get('service', $s, 'out_file'),
-			      $cf->get('service', $s, 'out_ext') // '');
-	} elsif ( ! $cf->is_set('service', $s, 'out_file_pfx') &&
-		  ! $cf->is_set('service', $s, 'out_file')) {
-	  $out_file = sprintf("%s%s", $obj->get_value($rdn),
-			      $cf->get('service', $s, 'out_ext') // '');
 	}
 
-	$dir = $out_file_pfx // $cf->get('service', $s, 'out_path');
-
-	$log->logg({ pr => 'debug', fm => "output directory: %s; file: %s",
-		     ls => [ $dir, $out_file ] })	if $v > 2;
-
-	# NEED TO AJUST TO ctrl_attr (array)
-	# $log->logg({ pr => 'debug',
-	# 	     fm => sprintf("SERVICE PREPROCESSING: % 8s; is-there-control-attribute( % 36s) = % 6s; DN: %s",
-	# 			   $s,
-	# 			   $cf->get('service', $s, 'ctrl_attr'),
-	# 			   $obj->exists($cf->get('service', $s, 'ctrl_attr')) ? 'TRUE' : 'FALSE',
-	# 			   $obj->dn) })
-	#   if $v > 3;
-
-	if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) { ### >>>>>>>>> 1
-
-	  ### COLLECTING ALL MAPPED ATTRIBUTES VALUES
-	  foreach my $i ( ( 'm', 's') ) {
-	    if ( $cf->is_section('service', $s, 'map', $i) ) {
-	      foreach my $j ( $cf->names_of('service', $s, 'map', $i) ) {
-		if ( $i eq 's' && ! $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
-		  if ( $cf->get(qw(core dryrun)) ) {
-		    $log->logg({ pr => 'debug', fm => "DRYRUN: %s to be deleted (no attribute: %s)",
-				 ls => [ $dir . '/' . $out_file,
-					 $cf->get('service', $s, 'map', $i, $j) ] });
-		  } else {
-		    if ( unlink $dir . '/' . $out_file ) {
-		      $log->logg({ pr => 'debug', fm => "file %s deleted (no attribute: %s)",
-				   ls => [ $dir . '/' . $out_file,
-					   $cf->get('service', $s, 'map', $i, $j) ] })
-			if $v > 0;
-		    } else {
-		      $log->logg({ pr => 'err', fm => "%s not removed (no attribute: %s); error: ",
-				   ls => [ $dir . '/' . $out_file,
-					   $cf->get('service', $s, 'map', $i, $j),
-					   $! ] });
-		    }
-		  }
-
-		  ### if any of `map s` attributes doesn't exist, we delete that config file
-		  ### preliminaryly and skip that attribute from been processed by Template
-		  next;
-
-		} elsif ( $i eq 'm' && $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
-		  $tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j),
-						    asref => 1 );
+	### COLLECTING ALL MAPPED ATTRIBUTES VALUES
+	foreach my $i ( ( 'm', 's') ) {
+	  if ( $cf->is_section('service', $s, 'map', $i) ) {
+	    foreach my $j ( $cf->names_of('service', $s, 'map', $i) ) {
+	      if ( $i eq 's' && ! $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
+		if ( $cf->get(qw(core dryrun)) ) {
+		  $log->cc( pr => 'debug', fm => "DRYRUN: %s to be deleted (no attribute: %s)",
+			    ls => [ $dir . '/' . $out_file,
+				    $cf->get('service', $s, 'map', $i, $j) ] );
 		} else {
-		  if ( $j =~ /certificateRevocationList/ ) {
-		    $tt_vars->{$j} =
-		      opensslize({ in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
-		  } elsif ( $j =~ /cACertificate/ ) {
-		    $tt_vars->{$j} =
-		      opensslize({ cmd => 'x509', in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
+		  if ( unlink $dir . '/' . $out_file ) {
+		    $log->cc( pr => 'debug', fm => "file %s deleted (no attribute: %s)",
+			      ls => [ $dir . '/' . $out_file,
+				      $cf->get('service', $s, 'map', $i, $j) ] )
+		      if $v > 0;
 		  } else {
-		    $tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) // 'NA';
+		    $log->cc( pr => 'err', fm => "%s not removed (no attribute: %s); error: ",
+			      ls => [ $dir . '/' . $out_file,
+				      $cf->get('service', $s, 'map', $i, $j),
+				      $! ] );
 		  }
+		}
+
+		### if any of `map s` attributes doesn't exist, we delete that config file
+		### preliminaryly and skip that attribute from been processed by Template
+		next;
+
+	      } elsif ( $i eq 'm' && $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
+		$tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j),
+						  asref => 1 );
+	      } else {
+		if ( $j =~ /certificateRevocationList/ ) {
+		  $tt_vars->{$j} =
+		    opensslize({ in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
+		} elsif ( $j =~ /cACertificate/ ) {
+		  $tt_vars->{$j} =
+		    opensslize({ cmd => 'x509', in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
+		} else {
+		  $tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) // 'NA';
 		}
 	      }
 	    }
 	  }
-	  $tt_vars->{prog}       = sprintf("%s v.%s", $PROGNAM, $VERSION);
-	  $tt_vars->{DN}         = $obj->dn;
-	  $tt_vars->{date}       = strftime( $ts_fmt, localtime(time));
-	  $tt_vars->{descr}      = $obj->get_value('description')
-	    if $obj->exists('description');
-	  $tt_vars->{server}     = ( split(/\@/, $obj->get_value('authorizedService')) )[1]
-	    if $obj->exists('authorizedService');
-	  $tt_vars->{createdby}  =
-	    ( split(/=/, ( split(/,/, $obj->get_value('creatorsName')) )[0]) )[1];
-	  $tt_vars->{modifiedby} =
-	    ( split(/=/, ( split(/,/, $obj->get_value('modifiersName')) )[0]) )[1];
-
-	  if ( ! $force && -e $dir . '/' . $out_file &&
-	       ( generalizedTime_to_time($obj->get_value('modifyTimestamp'))
-		 <
-		 (stat($dir . '/' . $out_file))[9] ) ) {
-	    $log->logg({ pr => 'debug',
-	  		 fm => "skip. object %s is older than target file %s, (object modifyTimestamp: %s is older than file mtime: %s",
-	  		 ls => [ $obj->dn, $dir . '/' . $out_file,
-				 strftime( "%F %T",
-					   localtime(generalizedTime_to_time($obj->get_value('modifyTimestamp')))),
-				 strftime( "%F %T", localtime((stat($dir . '/' . $out_file))[9])),
-			       ] })
-	      if $v > 0;
-	    return;
-	  }
-
-	  ### PICKING ROOT OBJECT RDN (IN OUR CASE IT IS "UID")
-	  foreach ( reverse split(/,/, $obj->dn) ) {
-	    next if $_ !~ /^uid=/;
-	    $tt_vars->{uid} = ( split(/=/, $_) )[1];
-	    last;
-	  }
-
-	  ### DRYRUN
-	  if ( $cf->get(qw(core dryrun)) ) {
-
-	    $log->logg({ pr => 'debug', fm => "DRYRUN: %s -> %s",
-			 ls => [
-				sprintf("%s/%s", $cf->get(qw(core tt_path)),
-					$cf->get('service', $s, 'tt_file')),
-				$dir. '/' . $out_file
-			       ] });
-
-	    if ( $cf->is_set($s, 'chmod') ) {
-	      $log->logg({ pr => 'err', fm => "DRYRUN: chmod %s, %s",
-			   ls => [ $cf->get('service', $s, 'chmod'), $dir . '/' . $out_file ] });
-	    } elsif ( $cf->is_set(qw(core chmod)) ) {
-	      $log->logg({ pr => 'err', fm => "DRYRUN: chmod %s, %s",
-			   ls => [ $cf->get('core', 'chmod'), $dir . '/' . $out_file ] });
-	    }
-
-	    if ( $cf->is_set($s, 'chown') ) {
-	      $log->logg({ pr => 'err', fm => "DRYRUN: chown %s, %s, %s",
-			   ls => [ $obj->get_value('uidNumber'),
-				   $obj->get_value('gidNumber'),
-				   $dir . '/' . $out_file ] });
-	    }
-	    return;
-	  }
-
-	  my ( $tmp_fh, $tmp_fn );
-	  eval { $tmp_fh = File::Temp->new( UNLINK => 0, DIR => $dir ); };
-	  if ( $@ ) {
-	    $log->logg({ pr => 'err', fm => "File::Temp->new( DIR => %s ); service \"%s\"; err: \"%s\"",
-			 ls => [ $dir, $s, $@ ] });
-	    return;
-	  }
-	  $tmp_fn = $tmp_fh->filename;
-	  my $tt = Template->new( TRIM        => $cf->get(qw(core tt_trim)),
-				  ABSOLUTE    => 1,
-				  RELATIVE    => 1,
-				  OUTPUT_PATH => $dir,
-				  DEBUG       => $fg // $cf->get(qw(core tt_debug)) );
-
-	  $log->logg({ pr => 'err', fm => "Template->new( OUTPUT_PATH => %s ) for service %s error: %s",
-		       ls => [ $dir, $s, $! ] })
-	    if ! defined $tt;
-
-	  $tt->process( sprintf("%s/%s",
-				$cf->get(qw(core tt_path)),
-				$cf->get('service', $s, 'tt_file')),
-			$tt_vars,
-			$tmp_fh ) || do {
-			  $log->logg({ pr => 'err', fm => "%s .tt process error: %s",
-				       ls => [ SYNST->[$st], $tt->error ] });
-			  return;
-			};
-
-	  close( $tmp_fh ) || do {
-	    $log->logg({ pr => 'err', fm => "close file (opened for writing), service %s, failed: %s",
-			 ls => [ $s, $! ] });
-	    next;
-	  };
-
-	  if ( $cf->get(qw(core dryrun)) ) {
-	    $log->logg({ pr => 'debug', fm => "DRYRUN: rename %s should be renamed to %s",
-			 ls => [ $tmp_fn, $out_file ] });
-	  } else {
-	    rename $tmp_fn, $dir . '/' . $out_file ||
-	      $log->logg({ pr => 'err', fm => "rename %s to %s, failed",
-			   ls => [ $tmp_fn, $dir . '/' . $out_file ] });
-
-	    if ( -e $dir . '/' . $out_file ) {
-	      if ( $cf->is_set('service', $s, 'chmod') ) {
-		chmod oct($cf->get('service', $s, 'chmod')), $dir . '/' . $out_file ||
-		  $log->logg({ pr => 'err', fm => "chmod for %s failed",
-			       ls => [ $dir . '/' . $out_file ] });
-	      } elsif ( $cf->is_set(qw(core chmod)) ) {
-		chmod oct($cf->(qw(core chmod))), $dir . '/' . $out_file ||
-		  $log->logg({ pr => 'err', fm => "chmod for %s failed",
-			       ls => [ $dir . '/' . $out_file ] });
-	      }
-
-	      if ( $cf->is_set('service', $s, 'chown') ) {
-		chown $obj->get_value('uidNumber'),
-		  $obj->get_value('gidNumber'),
-		  $dir . '/' . $out_file ||
-		  $log->logg({ pr => 'err', fm => "chown ($s:$s) %s failed",
-			       ls => [ $obj->get_value('uidNumber'),
-				       $obj->get_value('gidNumber'),
-				       $dir . '/' . $out_file ] });
-	      }
-	    } else {
-	      $log->logg({ pr => 'err', fm => "%s disappeared, no such file any more...",
-			   ls => [ $dir . '/' . $out_file ] });
-	    }
-	  }
-	  $log->logg({ pr => 'debug', fm => "control %s: DN: %s processed successfully",
-		       ls => [ SYNST->[$st], $obj->dn ] });
-
-	} elsif ( $st == LDAP_SYNC_DELETE ) { ### >>>>>>>>> 2
-	  if ( $cf->get(qw(core dryrun)) ) {
-	    $log->logg({ pr => 'debug', fm => "DRYRUN: file %s should be deleted",
-			 ls => [ $dir . '/' . $out_file ] });
-	  } else {
-	    if ( unlink $dir . '/' . $out_file ) {
-	      $log->logg({ pr => 'debug', fm => "file %s was successfully deleted",
-			   ls => [ $dir . '/' . $out_file ] })
-		if $v > 0;
-	    } else {
-	      $log->logg({ pr => 'err', fm => "file %s was not removed; error: ",
-			   ls => [ $dir . '/' . $out_file, $! ] });
-	    }
-	  }
-	  $log->logg({ pr => 'debug', fm => "control %s: DN: %s processed successfully",
-		       ls => [ SYNST->[$st], $obj->dn ] });
 	}
-      } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
-	$log->logg({ pr => 'debug', fm => "Received SYNC DONE CONTROL" }) if $v > 1;
-      } elsif ( ! defined $syncstate ) {
-	$log->logg({ pr => 'warning',
-		     fm => "LDAP entry without Sync State control" }) if $v > 1;
-      }
+	$tt_vars->{prog}       = sprintf("%s v.%s", $PROGNAM, $VERSION);
+	$tt_vars->{DN}         = $obj->dn;
+	$tt_vars->{date}       = strftime( $ts_fmt, localtime(time));
+	$tt_vars->{descr}      = $obj->get_value('description')
+	  if $obj->exists('description');
+	$tt_vars->{server}     = ( split(/\@/, $obj->get_value('authorizedService')) )[1]
+	  if $obj->exists('authorizedService');
+	$tt_vars->{createdby}  =
+	  ( split(/=/, ( split(/,/, $obj->get_value('creatorsName')) )[0]) )[1];
+	$tt_vars->{modifiedby} =
+	  ( split(/=/, ( split(/,/, $obj->get_value('modifiersName')) )[0]) )[1];
 
-      $req->cookie($syncstate->cookie) if $syncstate->cookie;
+	if ( ! $force && -e $dir . '/' . $out_file &&
+	     ( generalizedTime_to_time($obj->get_value('modifyTimestamp'))
+	       <
+	       (stat($dir . '/' . $out_file))[9] ) ) {
+	  $log->cc( pr => 'debug',
+		    fm => "skip. object %s is older than target file %s, (object modifyTimestamp: %s is older than file mtime: %s",
+		    ls => [ $obj->dn, $dir . '/' . $out_file,
+			    strftime( "%F %T",
+				      localtime(generalizedTime_to_time($obj->get_value('modifyTimestamp')))),
+			    strftime( "%F %T", localtime((stat($dir . '/' . $out_file))[9])),
+			  ] )
+	    if $v > 0;
+	  return;
+	}
+
+	### PICKING ROOT OBJECT RDN (IN OUR CASE IT IS "UID")
+	foreach ( reverse split(/,/, $obj->dn) ) {
+	  next if $_ !~ /^uid=/;
+	  $tt_vars->{uid} = ( split(/=/, $_) )[1];
+	  last;
+	}
+
+	### DRYRUN
+	if ( $cf->get(qw(core dryrun)) ) {
+
+	  $log->cc( pr => 'debug', fm => "DRYRUN: %s -> %s",
+		    ls => [
+			   sprintf("%s/%s", $cf->get(qw(core tt_path)),
+				   $cf->get('service', $s, 'tt_file')),
+			   $dir. '/' . $out_file
+			  ] );
+
+	  if ( $cf->is_set($s, 'chmod') ) {
+	    $log->cc( pr => 'err', fm => "DRYRUN: chmod %s, %s",
+		      ls => [ $cf->get('service', $s, 'chmod'), $dir . '/' . $out_file ] );
+	  } elsif ( $cf->is_set(qw(core chmod)) ) {
+	    $log->cc( pr => 'err', fm => "DRYRUN: chmod %s, %s",
+		      ls => [ $cf->get('core', 'chmod'), $dir . '/' . $out_file ] );
+	  }
+
+	  if ( $cf->is_set($s, 'chown') ) {
+	    $log->cc( pr => 'err', fm => "DRYRUN: chown %s, %s, %s",
+		      ls => [ $obj->get_value('uidNumber'),
+			      $obj->get_value('gidNumber'),
+			      $dir . '/' . $out_file ] );
+	  }
+	  return;
+	}
+
+	my ( $tmp_fh, $tmp_fn );
+	eval { $tmp_fh = File::Temp->new( UNLINK => 0, DIR => $dir ); };
+	if ( $@ ) {
+	  $log->cc( pr => 'err', fm => "File::Temp->new( DIR => %s ); service \"%s\"; err: \"%s\"",
+		    ls => [ $dir, $s, $@ ] );
+	  return;
+	}
+	$tmp_fn = $tmp_fh->filename;
+	my $tt = Template->new( TRIM        => $cf->get(qw(core tt_trim)),
+				ABSOLUTE    => 1,
+				RELATIVE    => 1,
+				OUTPUT_PATH => $dir,
+				DEBUG       => $fg // $cf->get(qw(core tt_debug)) );
+
+	$log->cc( pr => 'err', fm => "Template->new( OUTPUT_PATH => %s ) for service %s error: %s",
+		  ls => [ $dir, $s, $! ] )
+	  if ! defined $tt;
+
+	$tt->process( sprintf("%s/%s",
+			      $cf->get(qw(core tt_path)),
+			      $cf->get('service', $s, 'tt_file')),
+		      $tt_vars,
+		      $tmp_fh ) || do {
+			$log->cc( pr => 'err', fm => "%s .tt process error: %s",
+				  ls => [ SYNST->[$st], $tt->error ] );
+			return;
+		      };
+
+	close( $tmp_fh ) || do {
+	  $log->cc( pr => 'err', fm => "close file (opened for writing), service %s, failed: %s",
+		    ls => [ $s, $! ] );
+	  next;
+	};
+
+	if ( $cf->get(qw(core dryrun)) ) {
+	  $log->cc( pr => 'debug', fm => "DRYRUN: rename %s should be renamed to %s",
+		    ls => [ $tmp_fn, $out_file ] );
+	} else {
+	  rename $tmp_fn, $dir . '/' . $out_file ||
+	    $log->cc( pr => 'err', fm => "rename %s to %s, failed",
+		      ls => [ $tmp_fn, $dir . '/' . $out_file ] );
+
+	  if ( -e $dir . '/' . $out_file ) {
+	    if ( $cf->is_set('service', $s, 'chmod') ) {
+	      chmod oct($cf->get('service', $s, 'chmod')), $dir . '/' . $out_file ||
+		$log->cc( pr => 'err', fm => "chmod for %s failed",
+			  ls => [ $dir . '/' . $out_file ] );
+	    } elsif ( $cf->is_set(qw(core chmod)) ) {
+	      chmod oct($cf->(qw(core chmod))), $dir . '/' . $out_file ||
+		$log->cc( pr => 'err', fm => "chmod for %s failed",
+			  ls => [ $dir . '/' . $out_file ] );
+	    }
+
+	    if ( $cf->is_set('service', $s, 'chown') ) {
+	      chown $obj->get_value('uidNumber'),
+		$obj->get_value('gidNumber'),
+		$dir . '/' . $out_file ||
+		$log->cc( pr => 'err', fm => "chown ($s:$s) %s failed",
+			  ls => [ $obj->get_value('uidNumber'),
+				  $obj->get_value('gidNumber'),
+				  $dir . '/' . $out_file ] );
+	    }
+	  } else {
+	    $log->cc( pr => 'err', fm => "%s disappeared, no such file any more...",
+		      ls => [ $dir . '/' . $out_file ] );
+	  }
+	}
+	$log->cc( pr => 'debug', fm => "control %s: dn: %s processed successfully.",
+		  ls => [ SYNST->[$st], $obj->dn ] );
+
+	#@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
+	#@#@#@#@#@#@# >>>>>>>>> 2
+	#@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
+      } elsif ( $st == LDAP_SYNC_DELETE ) {
+	if ( $cf->get(qw(core dryrun)) ) {
+	  $log->cc( pr => 'debug', fm => "DRYRUN: file %s should be deleted",
+		    ls => [ $dir . '/' . $out_file ] );
+	} else {
+	  if ( unlink $dir . '/' . $out_file ) {
+	    $log->cc( pr => 'debug', fm => "file %s was successfully deleted",
+		      ls => [ $dir . '/' . $out_file ] )
+	      if $v > 0;
+	  } else {
+	    $log->cc( pr => 'err', fm => "file %s was not removed; error: ",
+		      ls => [ $dir . '/' . $out_file, $! ] );
+	  }
+	}
+	$log->cc( pr => 'debug', fm => "control %s: dn: %s processed successfully..",
+		  ls => [ SYNST->[$st], $obj->dn ] );
+      }
+    } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
+      $log->cc( pr => 'debug', fm => "Received SYNC DONE CONTROL" ) if $v > 1;
+    } elsif ( ! defined $syncstate ) {
+      $log->cc( pr => 'warning', fm => "LDAP entry without Sync State control" ) if $v > 1;
+    }
+
+    $req->cookie($syncstate->cookie) if $syncstate->cookie;
   
-    } elsif ( defined $obj && $obj->isa('Net::LDAP::Intermediate') ) {
+  } elsif ( defined $obj && $obj->isa('Net::LDAP::Intermediate') ) {
+    $log->cc( pr => 'debug', fm => "Received Net::LDAP::Intermediate\n%s", ls => [ $obj ] )
+      if $v > 3;
     $req->cookie($obj->{'asn'}->{'refreshDelete'}->{'cookie'});
   } elsif ( defined $obj && $obj->isa('Net::LDAP::Reference') ) {
+    $log->cc( pr => 'debug', fm => "Received Net::LDAP::Reference\n%s", ls => [ $obj ] )
+      if $v > 3;
     return;
   } else {
     return;
   }
+}
+
+sub out_paths {
+  local %_ = @_;
+  my $arg = { cf      => $_{cf},
+	      obj     => $_{obj},
+	      s       => $_{s},
+	      rdn     => $_{rdn},
+	      rdn_val => $_{rdn_val} // $_{obj}->get_value($_{rdn}), };
+  my ($out_file_pfx, $out_file);
+  if ( $arg->{cf}->is_set('service', $arg->{s}, 'out_file_pfx') &&
+       $arg->{cf}->is_set('service', $arg->{s}, 'out_file') ) {
+    $out_file_pfx = $arg->{obj}->get_value($arg->{cf}->get('service', $arg->{s}, 'out_file_pfx'));
+    $out_file_pfx = substr($out_file_pfx, 1) if $arg->{cf}->is_set(qw(core altroot));
+    if ( ! -d $out_file_pfx ) {
+      $log->cc( pr => 'err', fm => "service %s, target directory %s doesn't exist",
+		ls => [ $arg->{s}, $out_file_pfx ] );
+      return ();
+    } else {
+      $out_file = sprintf("%s%s", $arg->{cf}->get('service', $arg->{s}, 'out_file'),
+			  $arg->{cf}->get('service', $arg->{s}, 'out_ext') // '');
+    }
+  } elsif ( ! $arg->{cf}->is_set('service', $arg->{s}, 'out_file_pfx') &&
+	    $arg->{cf}->is_set('service', $arg->{s}, 'out_file')) {
+    $out_file = sprintf("%s%s", $arg->{cf}->get('service', $arg->{s}, 'out_file'),
+			$arg->{cf}->get('service', $arg->{s}, 'out_ext') // '');
+  } elsif ( ! $arg->{cf}->is_set('service', $arg->{s}, 'out_file_pfx') &&
+	    ! $arg->{cf}->is_set('service', $arg->{s}, 'out_file')) {
+    $out_file = sprintf("%s%s", $arg->{rdn_val},
+			$arg->{cf}->get('service', $arg->{s}, 'out_ext') // '');
+  }
+
+  return ( out_file_pfx => $out_file_pfx, out_file => $out_file );
 }
 
 sub opensslize {
@@ -701,9 +785,10 @@ sub opensslize {
   waitpid( $pid, 0 );
   my $chst = $? >> 8;
   if ( $chst ) {
-    $log->logg({ pr => 'err',
-	   fm => "opensslize() error!" }) if $v > 1;
-  };
+    $log->cc( pr => 'err',
+	      fm => "opensslize() error!" ) if $v > 1;
+  }
+  ;
 
   $arg->{res} .= $_ while ( <$chou> );
 
