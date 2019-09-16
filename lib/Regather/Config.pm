@@ -615,6 +615,7 @@ out_ext      = STRING
 out_file     = STRING
 out_file_pfx = STRING
 out_path     = STRING :check=chk_dir
+post_process = STRING
 skip         = NUMBER :default 0
 tt_file      = STRING :mandatory :check=chk_file_tt
 uid          = STRING

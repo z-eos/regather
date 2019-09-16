@@ -65,6 +65,21 @@ my $get_opt_res =
 my $log = new Regather::Logg( prognam    => $PROGNAM,
 			      foreground => $fg,
 			      colors     => $colors );
+
+my $cf_mode = (stat($config))[2] & 0777;
+my $fm_msg;
+if ( $cf_mode & 002 || $cf_mode & 006 ) {
+  $fm_msg = 'world';
+} elsif ( $cf_mode & 020 || $cf_mode & 060) {
+  $fm_msg = 'group';
+}
+if ( defined $fm_msg ) {
+  $log->cc( pr => 'err', fm => 'config file is accessible by ' . $fm_msg);
+  pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
+  exit 1;
+}
+
+
 $log->cc( pr => 'info', fm => "Regather::Logg initialized ..." ) if $v > 1;
 
 $log->cc( pr => 'info', fm => "options provided from CLI:\n%s", ls => [ $cli ] )
@@ -847,6 +862,10 @@ On LDAP repl event, consumer receives syncstate, we process these three:
 on LDAP_SYNC_ADD and LDAP_SYNC_MODIFY we just overwrite all configured
 for the service things (files, directories e.t.c.)
 
+ModRDN event comes as LDAP_SYNC_MODIFY, and since in DN it has the new
+RDN, the only way to know the old one (to delete all resources related
+to it) we need search accesslog DB for the attribute reqNewRDN=new-RDN
+
 LDAP_SYNC_DELETE differs a bit, it can be spawned by deletion of LDAP
 object itself or by deletion of some attribute of the object. So, on that
 event we restore previous state of the object from accesslog DB (which
@@ -863,9 +882,10 @@ stuff, configured for that service.
 
 =item I<reqType = modify>
 
-this is the deletion of an attribute and we need to know whether it
-was I<ctrl_attr> one (look B<CONFIG FILE> section bellow). If it is,
-then we destroy all related stuff, configured in service.
+this is (except the case with ModRDN) the deletion of an attribute and
+we need to know whether it was I<ctrl_attr> one (look B<CONFIG FILE>
+section bellow). If it is, then we destroy all related stuff,
+configured in service.
 
 =back
 
@@ -875,7 +895,8 @@ then we destroy all related stuff, configured in service.
 
 =item B<-c | --config>
 
-config file (mandatory)
+config file, it must be owned by root and must not be group and world
+accessible. (mandatory)
 
 =item B<-f | --foreground>
 
