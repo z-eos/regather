@@ -14,6 +14,7 @@ use List::Util   qw(uniqstr);
 use IPC::Open2;
 use File::Temp;
 use File::Basename;
+use Mail::Send;
 
 use Regather::Config;
 use Regather::Logg;
@@ -37,7 +38,7 @@ use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDA
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-our $VERSION    = '0.74';
+our $VERSION    = '0.75';
 
 our $v      = 0;
 our $fg     = 0;
@@ -52,7 +53,7 @@ my $ch;
 my $get_opt_res =
   GetOptions(
 	     'f|foreground' => \$fg,
-	     'F|force'     => \$force,
+	     'F|force'      => \$force,
 	     'c|config=s'   => \$config,
 	     'colors'       => \$colors,
 	     'C|cli=s%'     => \$cli,
@@ -335,10 +336,10 @@ sub ldap_search_callback {
   my $syncstate = scalar @controls ? $controls[0] : undef;
 
   my ( $s, $st, $mesg, $entry, @entries, $ldif, $tt_vars, $map,
-       %out_paths, $out_file_pfx, $out_file, $out_file_pfx_old, $out_file_old,
+       %out_paths, $out_file_pfx, $out_file, $out_file_pfx_old, $out_file_old, $dir, $out_to,
        $tmp_debug_msg,
        $rdn, $rdn_old, $rdn_re,
-       $dir );
+       $pp, $chin, $chou, $chst, $cher, $email, $email_body );
 
   $log->cc( pr => 'debug', fm => "syncstate: %s", ls => [ $syncstate ] )
     if $v > 5;
@@ -353,7 +354,7 @@ sub ldap_search_callback {
       my %reqmod;
       $log->cc( fm => "received control %s: dn: %s", ls => [ SYNST->[$st], $obj->dn ] );
 
-      ### discovering a service, $obj relates to
+      ### picking up the service, $obj relates to
       my $is_ctrl_attr;
       my $ctrl_srv_re;
       foreach ( @svc ) {
@@ -505,24 +506,15 @@ sub ldap_search_callback {
       return if ! %out_paths;
       $out_file_pfx = $out_paths{out_file_pfx} if exists $out_paths{out_file_pfx};
       $out_file     = $out_paths{out_file}     if exists $out_paths{out_file};
-
       $dir = $out_file_pfx // $cf->get('service', $s, 'out_path');
+      $out_to = $dir . '/' . $out_file;
 
       $log->cc( pr => 'debug', fm => "output directory: %s; file: %s",
-		ls => [ $dir, $out_file ] )	if $v > 2;
+		ls => [ $dir, $out_file ] ) if $v > 2;
 
-      # NEED TO AJUST TO ctrl_attr array topology
-      # $log->cc( pr => 'debug',
-      # 	     fm => sprintf("SERVICE PREPROCESSING: % 8s; is-there-control-attribute( % 36s) = % 6s; DN: %s",
-      # 			   $s,
-      # 			   $cf->get('service', $s, 'ctrl_attr'),
-      # 			   $obj->exists($cf->get('service', $s, 'ctrl_attr')) ? 'TRUE' : 'FALSE',
-      # 			   $obj->dn) )
-      #   if $v > 3;
-
-      #@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
-      #@#@#@#@#@#@# >>>>>>>>> 1
-      #@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
+      ######################################################################
+      ####### --------------------------------------------------->>>>>>>>> 1
+      ######################################################################
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
 
 	if ( defined $out_file_old ) {
@@ -542,19 +534,15 @@ sub ldap_search_callback {
 	      if ( $i eq 's' && ! $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
 		if ( $cf->get(qw(core dryrun)) ) {
 		  $log->cc( pr => 'debug', fm => "DRYRUN: %s to be deleted (no attribute: %s)",
-			    ls => [ $dir . '/' . $out_file,
-				    $cf->get('service', $s, 'map', $i, $j) ] );
+			    ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j) ] );
 		} else {
-		  if ( unlink $dir . '/' . $out_file ) {
+		  if ( unlink $out_to ) {
 		    $log->cc( pr => 'debug', fm => "file %s deleted (no attribute: %s)",
-			      ls => [ $dir . '/' . $out_file,
-				      $cf->get('service', $s, 'map', $i, $j) ] )
+			      ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j) ] )
 		      if $v > 0;
 		  } else {
 		    $log->cc( pr => 'err', fm => "%s not removed (no attribute: %s); error: ",
-			      ls => [ $dir . '/' . $out_file,
-				      $cf->get('service', $s, 'map', $i, $j),
-				      $! ] );
+			      ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j), $! ] );
 		  }
 		}
 
@@ -591,16 +579,16 @@ sub ldap_search_callback {
 	$tt_vars->{modifiedby} =
 	  ( split(/=/, ( split(/,/, $obj->get_value('modifiersName')) )[0]) )[1];
 
-	if ( ! $force && -e $dir . '/' . $out_file &&
+	if ( ! $force && -e $out_to &&
 	     ( generalizedTime_to_time($obj->get_value('modifyTimestamp'))
 	       <
-	       (stat($dir . '/' . $out_file))[9] ) ) {
+	       (stat($out_to))[9] ) ) {
 	  $log->cc( pr => 'debug',
 		    fm => "skip. object %s is older than target file %s, (object modifyTimestamp: %s is older than file mtime: %s",
-		    ls => [ $obj->dn, $dir . '/' . $out_file,
+		    ls => [ $obj->dn, $out_to,
 			    strftime( "%F %T",
 				      localtime(generalizedTime_to_time($obj->get_value('modifyTimestamp')))),
-			    strftime( "%F %T", localtime((stat($dir . '/' . $out_file))[9])),
+			    strftime( "%F %T", localtime((stat($out_to))[9])),
 			  ] )
 	    if $v > 0;
 	  return;
@@ -625,17 +613,17 @@ sub ldap_search_callback {
 
 	  if ( $cf->is_set($s, 'chmod') ) {
 	    $log->cc( pr => 'err', fm => "DRYRUN: chmod %s, %s",
-		      ls => [ $cf->get('service', $s, 'chmod'), $dir . '/' . $out_file ] );
+		      ls => [ $cf->get('service', $s, 'chmod'), $out_to ] );
 	  } elsif ( $cf->is_set(qw(core chmod)) ) {
 	    $log->cc( pr => 'err', fm => "DRYRUN: chmod %s, %s",
-		      ls => [ $cf->get('core', 'chmod'), $dir . '/' . $out_file ] );
+		      ls => [ $cf->get('core', 'chmod'), $out_to ] );
 	  }
 
 	  if ( $cf->is_set($s, 'chown') ) {
 	    $log->cc( pr => 'err', fm => "DRYRUN: chown %s, %s, %s",
 		      ls => [ $obj->get_value('uidNumber'),
 			      $obj->get_value('gidNumber'),
-			      $dir . '/' . $out_file ] );
+			      $out_to ] );
 	  }
 	  return;
 	}
@@ -678,57 +666,107 @@ sub ldap_search_callback {
 	  $log->cc( pr => 'debug', fm => "DRYRUN: rename %s should be renamed to %s",
 		    ls => [ $tmp_fn, $out_file ] );
 	} else {
-	  rename $tmp_fn, $dir . '/' . $out_file ||
+	  rename $tmp_fn, $out_to ||
 	    $log->cc( pr => 'err', fm => "rename %s to %s, failed",
-		      ls => [ $tmp_fn, $dir . '/' . $out_file ] );
+		      ls => [ $tmp_fn, $out_to ] );
 
-	  if ( -e $dir . '/' . $out_file ) {
+	  if ( -e $out_to ) {
 	    if ( $cf->is_set('service', $s, 'chmod') ) {
-	      chmod oct($cf->get('service', $s, 'chmod')), $dir . '/' . $out_file ||
+	      chmod oct($cf->get('service', $s, 'chmod')), $out_to ||
 		$log->cc( pr => 'err', fm => "chmod for %s failed",
-			  ls => [ $dir . '/' . $out_file ] );
+			  ls => [ $out_to ] );
 	    } elsif ( $cf->is_set(qw(core chmod)) ) {
-	      chmod oct($cf->(qw(core chmod))), $dir . '/' . $out_file ||
+	      chmod oct($cf->(qw(core chmod))), $out_to ||
 		$log->cc( pr => 'err', fm => "chmod for %s failed",
-			  ls => [ $dir . '/' . $out_file ] );
+			  ls => [ $out_to ] );
 	    }
 
 	    if ( $cf->is_set('service', $s, 'chown') ) {
 	      chown $obj->get_value('uidNumber'),
 		$obj->get_value('gidNumber'),
-		$dir . '/' . $out_file ||
-		$log->cc( pr => 'err', fm => "chown ($s:$s) %s failed",
+		$out_to ||
+		$log->cc( pr => 'err', fm => "chown (%s:%s) %s failed",
 			  ls => [ $obj->get_value('uidNumber'),
 				  $obj->get_value('gidNumber'),
-				  $dir . '/' . $out_file ] );
+				  $out_to ] );
 	    }
 	  } else {
 	    $log->cc( pr => 'err', fm => "%s disappeared, no such file any more...",
-		      ls => [ $dir . '/' . $out_file ] );
+		      ls => [ $out_to ] );
 	  }
 	}
 	$log->cc( pr => 'debug', fm => "control %s: dn: %s processed successfully.",
 		  ls => [ SYNST->[$st], $obj->dn ] );
 
-	#@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
-	#@#@#@#@#@#@# >>>>>>>>> 2
-	#@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@##@#@#@#@#@#@#
+	if ( $cf->is_set('service', $s, 'post_process') ) {
+	  foreach $pp ( @{$cf->get('service', $s, 'post_process')} ) {
+	    my $pid = open2( $chou, $chin, $pp );
+	    waitpid( $pid, 0 );
+	    $chst = $? >> 8;
+	    if ( $chst ) {
+	      $cher .= $_ while ( <$chou> );
+	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ],
+			fm => "service %s post_process: %s, error: %s", );
+	      if ( $cf->get('core', 'notify') == 1 && $cf->is_set('core', 'notify_email') ) {
+		$email = Mail::Send->new;
+		$email->subject(sprintf("regather: service %s post_process: %s, error", $s, $pp));
+		$email->to( @{$cf->get('core', 'notify_email')} );
+		$email_body = $email->open;
+		print $email_body "$pp\n\n";
+		print $email_body $cher;
+		$email_body->close ||
+		  $log->cc( pr => 'err', ls => [ $s, $pp ],
+			    fm => "service %s post_process: %s, error email failed", );
+	      }
+	    }
+
+	  }
+	}
+
+	######################################################################
+	####### --------------------------------------------------->>>>>>>>> 2
+	######################################################################
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 	if ( $cf->get(qw(core dryrun)) ) {
 	  $log->cc( pr => 'debug', fm => "DRYRUN: file %s should be deleted",
-		    ls => [ $dir . '/' . $out_file ] );
+		    ls => [ $out_to ] );
 	} else {
-	  if ( unlink $dir . '/' . $out_file ) {
+	  if ( unlink $out_to ) {
 	    $log->cc( pr => 'debug', fm => "file %s was successfully deleted",
-		      ls => [ $dir . '/' . $out_file ] )
+		      ls => [ $out_to ] )
 	      if $v > 0;
 	  } else {
 	    $log->cc( pr => 'err', fm => "file %s was not removed; error: ",
-		      ls => [ $dir . '/' . $out_file, $! ] );
+		      ls => [ $out_to, $! ] );
 	  }
 	}
 	$log->cc( pr => 'debug', fm => "control %s: dn: %s processed successfully..",
 		  ls => [ SYNST->[$st], $obj->dn ] );
+
+	if ( $cf->is_set('service', $s, 'post_process') ) {
+	  foreach $pp ( @{$cf->get('service', $s, 'post_process')} ) {
+	    my $pid = open2( $chou, $chin, $pp );
+	    waitpid( $pid, 0 );
+	    $chst = $? >> 8;
+	    if ( $chst ) {
+	      $cher .= $_ while ( <$chou> );
+	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ],
+			fm => "service %s post_process: %s, error: %s", );
+	      if ( $cf->get('core', 'notify') == 1 && $cf->is_set('core', 'notify_email') ) {
+		$email = Mail::Send->new;
+		$email->subject(sprintf("regather: service %s post_process: %s, error", $s, $pp));
+		$email->to( @{$cf->get('core', 'notify_email')} );
+		$email_body = $email->open;
+		print $email_body "$pp\n\n";
+		print $email_body $cher;
+		$email_body->close ||
+		  $log->cc( pr => 'err', ls => [ $s, $pp ],
+			    fm => "service %s post_process: %s, error email failed", );
+	      }
+	    }
+
+	  }
+	}
       }
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
       $log->cc( pr => 'debug', fm => "Received SYNC DONE CONTROL" ) if $v > 1;
@@ -803,7 +841,6 @@ sub opensslize {
     $log->cc( pr => 'err',
 	      fm => "opensslize() error!" ) if $v > 1;
   }
-  ;
 
   $arg->{res} .= $_ while ( <$chou> );
 
