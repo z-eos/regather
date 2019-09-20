@@ -317,6 +317,11 @@ sub mangle {
   } else {
     chdir('/');
   }
+
+  if ( $self->get(qw(core notify)) == 1 && ! $self->is_set(qw(core notify_email)) ) {
+    print "option core.notify requested, while core.notify_email is not set\n\n";
+    exit 2;
+  }
 }
 
 =item config_help
@@ -425,7 +430,7 @@ sub chk_file_tt {
 
 =item core_only
 
-informer (to spawn error if I<core> section option appears in other section)
+informer (to spawn error if I<core> section option been used in not I<core> section)
 
 =cut
 
@@ -436,11 +441,27 @@ sub core_only {
   return 0;
 }
 
+=item chk_depend_notify
+
+service I<notify> dependency check
+
+service related notifications have sense only when notify_email is defined
+
+=cut
+
+sub chk_depend_notify {
+  my ($self, $valref, $prev_value, $locus) = @_;
+  if ( $self->is_set(qw(core notify_email)) ) {
+    $self->error(sprintf("notify_email is not defined"),
+		 locus => $locus);
+    return 0;
+  }
+  return 1;
+}
+
 =item error
 
 error handler
-
-=back
 
 =cut
 
@@ -469,6 +490,8 @@ for general description of the format used.
 
 So, in general, config file consists of mandatory sections (with theirs
 subsections) B<core>, B<ldap> and B<service>
+
+B<core> must go first, all other after it.
 
 Each section can have mandatory options.
 
@@ -613,6 +636,7 @@ chown	     = NUMBER :default 1
 ctrl_attr    = STRING :mandatory :array
 ctrl_srv_re  = STRING :mandatory
 gid          = STRING
+notify       = NUMBER :default 0 :check=chk_depend_notify
 out_ext      = STRING
 out_file     = STRING
 out_file_pfx = STRING

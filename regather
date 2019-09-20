@@ -14,7 +14,6 @@ use List::Util   qw(uniqstr);
 use IPC::Open2;
 use File::Temp;
 use File::Basename;
-use Mail::Send;
 
 use Regather::Config;
 use Regather::Logg;
@@ -38,7 +37,7 @@ use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDA
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-our $VERSION    = '0.75';
+our $VERSION    = '0.76';
 
 our $v      = 0;
 our $fg     = 0;
@@ -80,7 +79,6 @@ if ( defined $fm_msg ) {
   exit 1;
 }
 
-
 $log->cc( pr => 'info', fm => "Regather::Logg initialized ..." ) if $v > 1;
 
 $log->cc( pr => 'info', fm => "options provided from CLI:\n%s", ls => [ $cli ] )
@@ -103,6 +101,7 @@ if ( $ch ) {
 }
 
 $log->set_m( $cf->getnode('log')->as_hash );
+$log->set( notify_email => [ $cf->get('core', 'notify_email') ] );
 
 $log->cc( pr => 'info', fm => "Dry Run is set on, no file is to be changed\n" )
   if $cf->get(qw(core dryrun));
@@ -385,7 +384,7 @@ sub ldap_search_callback {
 			       timelimit=> $cf->get(qw(ldap srch timelimit)),
 			       filter   => '(reqDN=' . $obj->dn . ')', );
 	if ( $mesg->code ) {
-	  $log->cc( pr => 'err',
+	  $log->cc( pr => 'err', nt => 1,
 		    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
 		    ls => [ SYNST->[$st],
 			    'base: ',   $cf->get(qw(ldap srch log_base)),
@@ -426,13 +425,12 @@ sub ldap_search_callback {
 				   scope  => 'base',
 				   filter => '(objectClass=*)', );
 	    if ( $mesg->code ) {
-	      $log->cc( pr => 'err',
+	      $log->cc( pr => 'err', nt => 1,
 			fm => "LDAP search %s %s error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			ls => [
-			       SYNST->[$st], 'reqType=modify',
-			       'base: ',     $cf->get(qw(ldap srch log_base)),
-			       'scope: ',    'sub',
-			       'filter: ',   '(reqDN=' . $obj->dn . ')' ] );
+			ls => [ SYNST->[$st], 'reqType=modify',
+				'base: ',     $cf->get(qw(ldap srch log_base)),
+				'scope: ',    'sub',
+				'filter: ',   '(reqDN=' . $obj->dn . ')' ] );
 	      $log->cc_ldap_err( mesg => $mesg );
 	      # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
 	    } else {
@@ -451,9 +449,9 @@ sub ldap_search_callback {
 			       timelimit=> $cf->get(qw(ldap srch timelimit)),
 			       filter   => '(reqDN=' . $obj->dn . ')', );
 	if ( $mesg->code ) {
-	  $log->cc( pr => 'err',
+	  $log->cc( pr => 'err', nt => 1,
 		    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		    ls => [ SYNST->[$st],
+		    ls => [ SYNST->[$st], nt => 1,
 			    'base: ',   $cf->get(qw(ldap srch log_base)),
 			    'scope: ',  'sub',
 			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
@@ -469,7 +467,7 @@ sub ldap_search_callback {
 				   timelimit=> $cf->get(qw(ldap srch timelimit)),
 				   filter   => '(reqNewRDN=' . (split(/,/, $obj->dn))[0] . ')', );
 	    if ( $mesg->code ) {
-	      $log->cc( pr => 'err',
+	      $log->cc( pr => 'err', nt => 1,
 			fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
 			ls => [ SYNST->[$st],
 				'base: ',   $cf->get(qw(ldap srch log_base)),
@@ -523,7 +521,7 @@ sub ldap_search_callback {
 		      ls => [ $dir . '/' . $out_file_old ] );
 	  } else {
 	    $log->cc( pr => 'err', fm => "%s not removed (after ModRDN); error: %s",
-		      ls => [ $dir . '/' . $out_file_old, $! ] );
+		      ls => [ $dir . '/' . $out_file_old, $! ], nt => 1, );
 	  }
 	}
 
@@ -542,7 +540,8 @@ sub ldap_search_callback {
 		      if $v > 0;
 		  } else {
 		    $log->cc( pr => 'err', fm => "%s not removed (no attribute: %s); error: ",
-			      ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j), $! ] );
+			      ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j), $! ],
+			      nt => 1, );
 		  }
 		}
 
@@ -705,21 +704,9 @@ sub ldap_search_callback {
 	    $chst = $? >> 8;
 	    if ( $chst ) {
 	      $cher .= $_ while ( <$chou> );
-	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ],
+	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ], nt => 1,
 			fm => "service %s post_process: %s, error: %s", );
-	      if ( $cf->get('core', 'notify') == 1 && $cf->is_set('core', 'notify_email') ) {
-		$email = Mail::Send->new;
-		$email->subject(sprintf("regather: service %s post_process: %s, error", $s, $pp));
-		$email->to( @{$cf->get('core', 'notify_email')} );
-		$email_body = $email->open;
-		print $email_body "$pp\n\n";
-		print $email_body $cher;
-		$email_body->close ||
-		  $log->cc( pr => 'err', ls => [ $s, $pp ],
-			    fm => "service %s post_process: %s, error email failed", );
-	      }
 	    }
-
 	  }
 	}
 
@@ -750,21 +737,9 @@ sub ldap_search_callback {
 	    $chst = $? >> 8;
 	    if ( $chst ) {
 	      $cher .= $_ while ( <$chou> );
-	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ],
+	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ], nt => 1,
 			fm => "service %s post_process: %s, error: %s", );
-	      if ( $cf->get('core', 'notify') == 1 && $cf->is_set('core', 'notify_email') ) {
-		$email = Mail::Send->new;
-		$email->subject(sprintf("regather: service %s post_process: %s, error", $s, $pp));
-		$email->to( @{$cf->get('core', 'notify_email')} );
-		$email_body = $email->open;
-		print $email_body "$pp\n\n";
-		print $email_body $cher;
-		$email_body->close ||
-		  $log->cc( pr => 'err', ls => [ $s, $pp ],
-			    fm => "service %s post_process: %s, error email failed", );
-	      }
 	    }
-
 	  }
 	}
       }
@@ -775,7 +750,7 @@ sub ldap_search_callback {
     }
 
     $req->cookie($syncstate->cookie) if $syncstate->cookie;
-  
+
   } elsif ( defined $obj && $obj->isa('Net::LDAP::Intermediate') ) {
     $log->cc( pr => 'debug', fm => "Received Net::LDAP::Intermediate\n%s", ls => [ $obj ] )
       if $v > 3;

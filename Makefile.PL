@@ -18,6 +18,7 @@ WriteMakefile(NAME             => 'regather',
 				   'Config::AST'          => '1.05',
 				   'Config::Parser'       => '1.04',
 				   'Config::Parser::ldap' => '1.00',
+				   'Mail::Tools'          => '2.19',
 				   'Net::LDAP'            => '0.65',
 				   'Template'             => '2.29',
 				   'Sys::Syslog'          => '0.29'

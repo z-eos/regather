@@ -7,6 +7,7 @@ use strict;
 use warnings;
 use diagnostics;
 use Sys::Syslog qw(:standard :macros);
+use Mail::Send;
 use Data::Printer caller_info => 1, class => { expand => 2 };
 
 # https://upload.wikimedia.org/wikipedia/commons/1/15/Xterm_256color_chart.svg
@@ -34,7 +35,8 @@ sub conclude {
   my ( $self, %args ) = @_;
   my %arg = ( fg => $args{fg} // $self->{foreground},
 	      pr => $args{pr} // 'info',
-	      fm => $args{fm}, );
+	      fm => $args{fm},
+	      nt => $args{nt} // 0 );
   $arg{pr_s} = sprintf("%s|%s", $arg{pr}, $self->{facility} // 'local4');
   $arg{pr_f} = sprintf("%s: ", uc($arg{pr}) );
 
@@ -44,8 +46,8 @@ sub conclude {
     $arg{ls} = [];
   }
 
+  $arg{msg} = sprintf $arg{pr_f} . $arg{fm}, @{$arg{ls}};
   if ( $arg{fg} ) {
-    $arg{msg} = sprintf $arg{pr_f} . $arg{fm}, @{$arg{ls}};
     p($arg{msg},
       colored     => $self->{colors} && $self->{foreground},
       caller_info => 0,
@@ -54,6 +56,8 @@ sub conclude {
   } else {
     syslog( $arg{pr_s}, $arg{pr_f} . $arg{fm}, @{$arg{ls}} );
   }
+
+  $self->notify( msg => $arg{msg} ) if $arg{nt};
 }
 
 sub cc { goto &conclude }
@@ -68,6 +72,19 @@ sub conclude_ldap_err {
 }
 
 sub cc_ldap_err { goto &conclude_ldap_err }
+
+sub notify {
+  my ( $self, %args ) = @_;
+  my $email = Mail::Send->new;
+  $email->subject(sprintf("[regather] %s... (skipped)",
+			  substr( $args{msg}, 0, 50)));
+  $email->to( @{$self->{notify_email}} );
+  my $email_body = $email->open;
+  print $email_body $args{msg};
+  $email_body->close ||
+    $self->cc( pr => 'err', ls => [ $! ],
+	       fm => "email sending error: %s", );
+}
 
 sub set_m {
   my ( $self, $cf ) = @_;
