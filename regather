@@ -354,6 +354,10 @@ sub ldap_search_callback {
       my %reqmod;
       $log->cc( fm => "received control %s: dn: %s", ls => [ SYNST->[$st], $obj->dn ] );
 
+      #######################################################################
+      ####### --- PRELIMINARY STUFF ----------------------------->>>>>>>>> 0
+      #######################################################################
+
       ### LDAP_SYNC_DELETE arrives for both cases, object deletetion
       ### and attribute deletion and in both cases Net::LDAP::Entry
       ### provided contains only DN, so, we need to "re-construct"
@@ -438,21 +442,16 @@ sub ldap_search_callback {
 			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
 	  $log->cc_ldap_err( mesg => $mesg );
 	} else {
-	if( $mesg->count > 0 ) {
+	  if ( $mesg->count > 0 ) {
 	    ### modified object has accesslog records when it was
 	    ### add/modify/delete before, as well as ModRDN ... so, we
 	    ### need to be sure, there is no accesslog object with
 	    ### reqNewRDN=<$obj->dn RDN> close to the processing time
 	    ### of this $obj
 
+	    ### NEED TO BE FINISHED
 
-
-
-
-
-
-
-	} elsif ( $mesg->count == 0 ) {
+	  } elsif ( $mesg->count == 0 ) {
 	    ### modified object has no accesslog records when it was
 	    ### ModRDN-ed so, we search for accesslog object with
 	    ### reqNewRDN=<$obj->dn RDN> to know old object RDN to use
@@ -524,7 +523,7 @@ sub ldap_search_callback {
 	}
       }
 
-      ### picking up the service, $obj relates to
+      ### picking up a service, the $obj relates to
       my $is_ctrl_attr;
       my $ctrl_srv_re;
       foreach ( @svc ) {
@@ -563,9 +562,9 @@ sub ldap_search_callback {
       $log->cc( pr => 'debug', fm => "output directory: %s; file: %s",
 		ls => [ $dir, $out_file ] ) if $v > 2;
 
-      ######################################################################
+      #######################################################################
       ####### --------------------------------------------------->>>>>>>>> 1
-      ######################################################################
+      #######################################################################
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
 
 	if ( defined $out_file_old ) {
@@ -763,9 +762,9 @@ sub ldap_search_callback {
 	  }
 	}
 
-	######################################################################
+	#######################################################################
 	####### --------------------------------------------------->>>>>>>>> 2
-	######################################################################
+	#######################################################################
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 	if ( $cf->get(qw(core dryrun)) ) {
 	  $log->cc( pr => 'debug', fm => "DRYRUN: file %s should be deleted",
