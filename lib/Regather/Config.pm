@@ -149,7 +149,7 @@ sub new {
 
   if ( defined $cli && ref($cli) eq 'HASH' ) {
     while ( my( $k, $v ) = each %{$cli} ) {
-      $self->add_value($k, $v, new Text::Locus("option \"$k\" provided from CLI",1)) ||
+      $self->add_value($k, $v, new Text::Locus("\noption \"$k\" provided from CLI",1)) ||
 	exit 1;
     }
   } else {
@@ -451,7 +451,7 @@ service related notifications have sense only when notify_email is defined
 
 sub chk_depend_notify {
   my ($self, $valref, $prev_value, $locus) = @_;
-  if ( $self->is_set(qw(core notify_email)) ) {
+  if ( ! $self->is_set(qw(core notify_email)) ) {
     $self->error(sprintf("notify_email is not defined"),
 		 locus => $locus);
     return 0;
@@ -560,7 +560,7 @@ altroot      = STRING :re="^/tmp/.*" :check=chk_dir
 dryrun       = NUMBER :default 0
 gid          = STRING
 notify       = NUMBER :default 0
-notify_email = STRING :array
+notify_email = STRING :mandatory :array
 pid_file     = STRING :check=chk_dir_pid :default /var/run/openldap/regather.pid
 tt_debug     = NUMBER :default 0
 tt_path      = STRING :check=chk_dir :default /usr/local/etc/regather.d

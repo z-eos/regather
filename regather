@@ -101,6 +101,7 @@ if ( $ch ) {
 }
 
 $log->set_m( $cf->getnode('log')->as_hash );
+$log->set( notify => [ $cf->get('core', 'notify') ] );
 $log->set( notify_email => [ $cf->get('core', 'notify_email') ] );
 
 $log->cc( pr => 'info', fm => "Dry Run is set on, no file is to be changed\n" )
@@ -353,26 +354,6 @@ sub ldap_search_callback {
       my %reqmod;
       $log->cc( fm => "received control %s: dn: %s", ls => [ SYNST->[$st], $obj->dn ] );
 
-      ### picking up the service, $obj relates to
-      my $is_ctrl_attr;
-      my $ctrl_srv_re;
-      foreach ( @svc ) {
-	$is_ctrl_attr = 0;
-	foreach my $ctrl_attr ( @{$cf->get('service', $_, 'ctrl_attr')} ) {
-	  if ( $obj->exists( $ctrl_attr ) ) {
-	    $is_ctrl_attr++;
-	  } else {
-	    $is_ctrl_attr--;
-	  }
-	}
-	$ctrl_srv_re = $cf->get('service', $_, 'ctrl_srv_re');
-	if ( $is_ctrl_attr > 0 &&
-	     $is_ctrl_attr == scalar( @{$cf->get('service', $_, 'ctrl_attr')} ) &&
-	     $obj->dn =~ qr/$ctrl_srv_re/ ) {
-	  $s = $_;
-	}
-      }
-
       ### LDAP_SYNC_DELETE arrives for both cases, object deletetion
       ### and attribute deletion and in both cases Net::LDAP::Entry
       ### provided contains only DN, so, we need to "re-construct"
@@ -457,10 +438,25 @@ sub ldap_search_callback {
 			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
 	  $log->cc_ldap_err( mesg => $mesg );
 	} else {
-	  ### if modified object has no accesslog records, it means it was ModRDN-ed
-	  ### so, we search for accesslog object with reqNewRDN=<$obj->dn RDN> to know
-	  ### old object RDN to use it further for $out_file
-	  if ( $mesg->count == 0 ) {
+	if( $mesg->count > 0 ) {
+	    ### modified object has accesslog records when it was
+	    ### add/modify/delete before, as well as ModRDN ... so, we
+	    ### need to be sure, there is no accesslog object with
+	    ### reqNewRDN=<$obj->dn RDN> close to the processing time
+	    ### of this $obj
+
+
+
+
+
+
+
+
+	} elsif ( $mesg->count == 0 ) {
+	    ### modified object has no accesslog records when it was
+	    ### ModRDN-ed so, we search for accesslog object with
+	    ### reqNewRDN=<$obj->dn RDN> to know old object RDN to use
+	    ### it further for $out_file
 	    $mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
 				   scope    => 'sub',
 				   sizelimit=> $cf->get(qw(ldap srch sizelimit)),
@@ -476,18 +472,75 @@ sub ldap_search_callback {
 	      $log->cc_ldap_err( mesg => $mesg );
 	      # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
 	    } else {
-	      $entry = $mesg->entry(0);
-	      $rdn_re = qr/^$rdn: .*$/;
-	      foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
-		$rdn_old = (split(/: /, $_))[1] if /$rdn_re/;
+	      ### here we pick last reqNewRDN entry, to find the
+	      ### latest UUID for entries with same DN if the object
+	      ### was added/deleted/ModRDN-ed several times
+	      @entries = $mesg->sorted;
+	      $entry = pop @entries;
+	      if ( defined $entry ) {
+		$rdn_re = qr/^$rdn: .*$/;
+		foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
+		  $rdn_old = (split(/: /, $_))[1] if /$rdn_re/;
+		}
+		### now we reconstruct original object
+		$mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
+				       scope    => 'sub',
+				       sizelimit=> $cf->get(qw(ldap srch sizelimit)),
+				       timelimit=> $cf->get(qw(ldap srch timelimit)),
+				       filter   => sprintf("(reqEntryUUID=%s)",
+							   $entry->get_value('reqEntryUUID')) );
+		if ( $mesg->code ) {
+		  $log->cc( pr => 'err', nt => 1,
+			    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			    ls => [ SYNST->[$st],
+				    'base: ',   $cf->get(qw(ldap srch log_base)),
+				    'scope: ',  'sub',
+				    'filter: ', sprintf("(reqEntryUUID=%s)",
+							$entry->get_value('reqEntryUUID') ) ] );
+		  $log->cc_ldap_err( mesg => $mesg );
+		  # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
+		} else {
+		  @entries = $mesg->sorted;
+		  if ( $entries[0]->get_value('reqType') eq 'add' ) {
+		    ### here we re-assemble $obj to have all attributes on its creation
+		    ### except RDN, which we'll set from next to the last element
+		    ### and since after that it'll has ctrl_attr but reqType=add,
+		    ### it'll go to $st == LDAP_SYNC_DELETE
+		    $obj->add( map { /^(.*):\+ (.*)$/g } @{$entry->get_value('reqMod', asref => 1)} );
+		    $obj->replace( $rdn => $entries[scalar(@entries) - 2]->get_value($rdn) );
+		  } else {
+		    $log->cc( pr => 'err', nt => 1,
+			      fm => "%s object (before ModRDN) to delete not found! accesslog reqType=add object nod found\n\nobject reqEntryUUID=%s should be processed manually",
+			      ls => [ SYNST->[$st], $entry->get_value('reqEntryUUID') ] );
+		  }
+		}
+	      } else {
+		$log->cc( pr => 'err', nt => 1,
+			  fm => "LDAP accesslog search on %s object returned no result\n\n",
+			  ls => [ SYNST->[$st] ] );
 	      }
-	      %out_paths = out_paths( cf => $cf, obj => $obj, s => $s,
-				      rdn => $rdn, rdn_val => $rdn_old );
-	      return if ! %out_paths;
-	      $out_file_pfx_old = $out_paths{out_file_pfx} if exists $out_paths{out_file_pfx};
-	      $out_file_old     = $out_paths{out_file}     if exists $out_paths{out_file};
 	    }
 	  }
+	}
+      }
+
+      ### picking up the service, $obj relates to
+      my $is_ctrl_attr;
+      my $ctrl_srv_re;
+      foreach ( @svc ) {
+	$is_ctrl_attr = 0;
+	foreach my $ctrl_attr ( @{$cf->get('service', $_, 'ctrl_attr')} ) {
+	  if ( $obj->exists( $ctrl_attr ) ) {
+	    $is_ctrl_attr++;
+	  } else {
+	    $is_ctrl_attr--;
+	  }
+	}
+	$ctrl_srv_re = $cf->get('service', $_, 'ctrl_srv_re');
+	if ( $is_ctrl_attr > 0 &&
+	     $is_ctrl_attr == scalar( @{$cf->get('service', $_, 'ctrl_attr')} ) &&
+	     $obj->dn =~ qr/$ctrl_srv_re/ ) {
+	  $s = $_;
 	}
       }
 
