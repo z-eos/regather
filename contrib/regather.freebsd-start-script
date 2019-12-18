@@ -1,0 +1,40 @@
+#!/bin/sh
+#
+# PROVIDE: regather
+# REQUIRE: slapd
+# BEFORE:  openvpn
+# KEYWORD: shutdown
+#
+# Add the following line to /etc/rc.conf to enable regather:
+#
+# regather_enable (bool):	Set to "NO" by default.
+#				Set to "YES" to enable regather
+#
+# regather_configfile (str):	Set to "/usr/local/etc/regather.conf" by default.
+#
+# regather_flags (str):	Set to "" by default.
+#
+
+. /etc/rc.subr
+
+name=regather
+rcvar=regather_enable
+
+: ${regather_enable="NO"}
+: ${regather_configfile="/usr/local/etc/regather.conf"}
+: ${regather_flags=""}
+
+command="/usr/local/bin/${name}"
+command_args="-c ${regather_configfile} ${regather_flags}"
+command_interpreter="/usr/local/bin/perl"
+
+required_files="${regather_configfile}"
+
+extra_commands=reload
+sig_reload=HUP
+
+load_rc_config "${name}"
+
+pidfile="/var/run/openldap/regather.pid"
+
+run_rc_command "$1"   

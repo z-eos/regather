@@ -1,0 +1,19 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          regather
+# Required-Start:    $local_fs $remote_fs $network $syslog firewall
+# Required-Stop:     $local_fs $remote_fs
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: regather
+# Description:       regather
+### END INIT INFO
+
+PIDFILE="/var/run/regather.pid"
+COMMAND="/usr/local/bin/regather"
+OPTIONS="-c /etc/regather.conf"
+exec /sbin/genrc --command "$COMMAND $OPTIONS" \
+                 --pidfile=$PIDFILE \
+                 --verbose \
+                 "$@"
+   
