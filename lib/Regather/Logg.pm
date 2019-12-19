@@ -18,113 +18,6 @@ use constant dpc => { info    => 'ansi113',
 		      warning => 'bold ansi237 on_ansi214', #bright_yellow',
 		    };
 
-sub new {
-  my $class           = shift;
-  local %_            = @_;
-  my $self            = bless {}, $class;
-  $self->{prognam}    = $_{prognam};
-  $self->{foreground} = $_{foreground} // 0;
-  $self->{colors}     = $_{colors}     // 0;
-  $self->{ts_fmt}     = "%a %F %T %Z (%z)";
-  $self->{hostname}   = hostname;
-
-  openlog($self->{prognam}, "ndelay,pid") if ! $self->{foreground};
-
-  $self
-}
-
-sub conclude {
-  my ( $self, %args ) = @_;
-  my %arg = ( fg => $args{fg} // $self->{foreground},
-	      pr => $args{pr} // 'info',
-	      fm => $args{fm},
-	      nt => $args{nt} // 0 );
-  $arg{pr_s} = sprintf("%s|%s", $arg{pr}, $self->{facility} // 'local4');
-  $arg{pr_f} = sprintf("%s: ", uc($arg{pr}) );
-
-  if ( exists $args{ls} ) {
-    @{$arg{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ } @{$args{ls}};
-  } else {
-    $arg{ls} = [];
-  }
-
-  $arg{msg} = sprintf $arg{pr_f} . $arg{fm}, @{$arg{ls}};
-  if ( $arg{fg} ) {
-    p($arg{msg},
-      colored     => $self->{colors} && $self->{foreground},
-      caller_info => 0,
-      color       => { string => dpc->{$arg{pr}}},
-      output      => 'stdout' );
-  } else {
-    syslog( $arg{pr_s}, $arg{pr_f} . $arg{fm}, @{$arg{ls}} );
-  }
-
-  $self->notify( msg => $arg{msg} ) if $arg{nt};
-}
-
-sub cc { goto &conclude }
-
-sub conclude_ldap_err {
-  my ( $self, %args ) = @_;
-  $self->cc( pr => 'err', fm => "LDAP ERROR:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-	     ls => [ 'ERROR: ',        $args{mesg}->error_name,
-		     'TEXT: ',         $args{mesg}->error_text,
-		     'DESCRIPTION: ',  $args{mesg}->error_desc,
-		     'SERVER ERROR: ', $args{mesg}->server_error ] );
-}
-
-sub cc_ldap_err { goto &conclude_ldap_err }
-
-sub notify {
-  my ( $self, %args ) = @_;
-  my $email = Mail::Send->new;
-  $email->subject(sprintf("[regather @ %s] %s... (skipped)",
-			  $self->{hostname},
-			  substr( $args{msg}, 0, 50)));
-  $email->to( @{$self->{notify_email}} );
-  my $email_body = $email->open;
-  print $email_body sprintf("host: %s\n\n", $self->{hostname});
-  print $email_body $args{msg};
-  $email_body->close ||
-    $self->cc( pr => 'err', ls => [ $! ],
-	       fm => "email sending error: %s", );
-}
-
-sub set_m {
-  my ( $self, $cf ) = @_;
-  if ( ref($cf) eq 'HASH' ) {
-    while ( my ( $k, $v ) = each %$cf ) {
-      next if exists $self->{$k};
-      $self->{$k} = $v;
-    }
-  } else {
-    $self->cc( pr => 'err',
-	       fm => "Logg::set_m(): argument supplied is not HASH ..." );
-    return 0;
-  }
-}
-
-sub set {
-  my ( $self, $k, $v ) = @_;
-  $self->{$k} = $v;
-}
-
-sub get {
-  my ( $self, $k ) = @_;
-  if ( exists $self->{$k} ) {
-    $self->{$k};
-  } else {
-    $self->cc( pr => 'err',
-	       fm => "attribute \"%s\" doesn't exist",
-	       ls => [ $k ] );
-    return;
-  }
-}
-
-1;
-
-__END__
-
 =pod
 
 =encoding UTF-8
@@ -153,7 +46,7 @@ This is a class to log messages.
 
 =over 4
 
-=item new
+=item B<new>
 
 Creates a new B<Regather::Logg> object
 
@@ -195,11 +88,28 @@ timestamp format string, default is: "%a %F %T %Z (%z)"
 
 =back
 
+=cut
+
+sub new {
+  my $class           = shift;
+  local %_            = @_;
+  my $self            = bless {}, $class;
+  $self->{prognam}    = $_{prognam};
+  $self->{foreground} = $_{foreground} // 0;
+  $self->{colors}     = $_{colors}     // 0;
+  $self->{ts_fmt}     = "%a %F %T %Z (%z)";
+  $self->{hostname}   = hostname;
+
+  openlog($self->{prognam}, "ndelay,pid") if ! $self->{foreground};
+
+  $self
+}
+
 =head1 METHODS
 
 =over 4
 
-=item logg
+=item B<conclude>
 
 main method to do the job
 
@@ -221,9 +131,52 @@ sprintf format string, with the addition that %m is replaced with "$!"
 
 list of values to be passed to sprintf as arguments
 
+=item nt =E<gt> 1 | 0
+
+wheather to send (notify) you this message with I<notify> method
+
 =back
 
-=item logg_ldap_err
+=cut
+
+sub conclude {
+  my ( $self, %args ) = @_;
+  my %arg = ( fg => $args{fg} // $self->{foreground},
+	      pr => $args{pr} // 'info',
+	      fm => $args{fm},
+	      nt => $args{nt} // 0 );
+  $arg{pr_s} = sprintf("%s|%s", $arg{pr}, $self->{facility} // 'local4');
+  $arg{pr_f} = sprintf("%s: ", uc($arg{pr}) );
+
+  if ( exists $args{ls} ) {
+    @{$arg{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ } @{$args{ls}};
+  } else {
+    $arg{ls} = [];
+  }
+
+  $arg{msg} = sprintf $arg{pr_f} . $arg{fm}, @{$arg{ls}};
+  if ( $arg{fg} ) {
+    p($arg{msg},
+      colored     => $self->{colors} && $self->{foreground},
+      caller_info => 0,
+      color       => { string => dpc->{$arg{pr}}},
+      output      => 'stdout' );
+  } else {
+    syslog( $arg{pr_s}, $arg{pr_f} . $arg{fm}, @{$arg{ls}} );
+  }
+
+  $self->notify( msg => $arg{msg} ) if $arg{nt};
+}
+
+=item B<cc>
+
+alias for I<conclude> method
+
+=cut
+
+sub cc { goto &conclude }
+
+=item B<conclude_ldap_err>
 
 method - wrapper around Net::LDAP::Message->error methods
 
@@ -231,11 +184,72 @@ method - wrapper around Net::LDAP::Message->error methods
 
 =item mesg =E<gt> Net::LDAP::Message object
 
-wrapper to log to syslog or stdin. On input it expects hash
-
 =back
 
-=item set
+=cut
+
+sub conclude_ldap_err {
+  my ( $self, %args ) = @_;
+  $self->cc( pr => 'err',
+	     fm => "LDAP ERROR:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+	     ls => [ 'ERROR: ',        $args{mesg}->error_name,
+		     'TEXT: ',         $args{mesg}->error_text,
+		     'DESCRIPTION: ',  $args{mesg}->error_desc,
+		     'SERVER ERROR: ', $args{mesg}->server_error ] );
+}
+
+=item B<cc_ldap_err>
+
+alias for I<conclude_ldap_err> method
+
+=cut
+
+sub cc_ldap_err { goto &conclude_ldap_err }
+
+=item B<notify>
+
+method to be used to send log message via email 
+
+=cut
+
+sub notify {
+  my ( $self, %args ) = @_;
+  my $email = Mail::Send->new;
+  $email->subject(sprintf("[regather @ %s] %s... (skipped)",
+			  $self->{hostname},
+			  substr( $args{msg}, 0, 50)));
+  $email->to( @{$self->{notify_email}} );
+  my $email_body = $email->open;
+  print $email_body sprintf("host: %s\n\n", $self->{hostname});
+  print $email_body $args{msg};
+  $email_body->close ||
+    $self->cc( pr => 'err', ls => [ $! ],
+	       fm => "email sending error: %s", );
+}
+
+=item B<set_m>
+
+setter to set options from config file
+
+on input it expects Regather::Config object section for Regather::Logg
+
+=cut
+
+sub set_m {
+  my ( $self, $cf ) = @_;
+  if ( ref($cf) eq 'HASH' ) {
+    while ( my ( $k, $v ) = each %$cf ) {
+      next if exists $self->{$k};
+      $self->{$k} = $v;
+    }
+  } else {
+    $self->cc( pr => 'err',
+	       fm => "Logg::set_m(): argument supplied is not HASH ..." );
+    return 0;
+  }
+}
+
+=item B<set>
 
 setter to set one single pair key => value
 
@@ -245,17 +259,32 @@ setter to set one single pair key => value
 
 =back
 
-=item set_m
+=cut
 
-setter to set options from config file
+sub set {
+  my ( $self, $k, $v ) = @_;
+  $self->{$k} = $v;
+}
 
-on input it expects Regather::Config object section for Regather::Logg
-
-=item get
+=item B<get>
 
 getter
 
 =back
+
+=cut
+
+sub get {
+  my ( $self, $k ) = @_;
+  if ( exists $self->{$k} ) {
+    $self->{$k};
+  } else {
+    $self->cc( pr => 'err',
+	       fm => "attribute \"%s\" doesn't exist",
+	       ls => [ $k ] );
+    return;
+  }
+}
 
 =head1 SEE ALSO
 
@@ -285,4 +314,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 =cut
+
+1;
+
+
 
