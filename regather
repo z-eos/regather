@@ -380,7 +380,15 @@ sub ldap_search_callback {
 	} else {
 	  $entry = pop @{[$mesg->sorted]};
 
-	  if ( $entry->get_value('reqType') eq 'delete' ) {
+	  if ( ! $entry->isa('Net::LDAP::Entry') ) {
+	    $log->cc( pr => 'err', nt => 1,
+		      fm => "LDAP accesslog search on %s, returned no result:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		      ls => [ SYNST->[$st],
+			      'base: ',   $cf->get(qw(ldap srch log_base)),
+			      'scope: ',  'sub',
+			      'filter: ', '(reqDN=' . $obj->dn . ')' ] );
+	    return;
+	  } elsif ( $entry->get_value('reqType') eq 'delete' ) {
 	    my $reqold = 'dn: ' . $obj->dn;
 	    foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
 	      s/^(.*;binary:) .*$/$1: c3R1Yg==/agis;
