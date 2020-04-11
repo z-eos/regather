@@ -15,7 +15,8 @@ use Data::Printer caller_info => 1, class => { expand => 2 };
 use constant dpc => { info    => 'ansi113',
 		      err     => 'bold ansi255 on_ansi196',
 		      debug   => 'ansi195', #grey18', #bright_yellow',
-		      warning => 'bold ansi237 on_ansi214', #bright_yellow',
+#		      warning => 'bold ansi237 on_ansi214', #bright_yellow',
+		      warning => 'ansi214', #bright_yellow',
 		    };
 
 =pod
@@ -71,7 +72,6 @@ if set, then priorities are colored this way:
 info    => 'ansi113'
 
 err     => 'bold ansi255 on_ansi196'
-
 debug   => 'ansi195'
 
 warning => 'bold ansi237 on_ansi214'
@@ -91,19 +91,26 @@ timestamp format string, default is: "%a %F %T %Z (%z)"
 =cut
 
 sub new {
-  my $class           = shift;
-  local %_            = @_;
-  my $self            = bless {}, $class;
-  $self->{prognam}    = $_{prognam};
-  $self->{foreground} = $_{foreground} // 0;
-  $self->{colors}     = $_{colors}     // 0;
-  $self->{ts_fmt}     = "%a %F %T %Z (%z)";
-  $self->{hostname}   = hostname;
+  my ( $self, %args ) = @_;
 
-  openlog($self->{prognam}, "ndelay,pid") if ! $self->{foreground};
+  $args{colors}     = $args{colors}     // 0;
+  $args{foreground} = $args{foreground} // 0;
+  $args{prognam}    = $args{prognam}    // lc( (split(/:/, __PACKAGE__))[0] );
+  $args{tsargsfmt}  = '%a %F %T %Z (%z)';
 
-  $self
+  eval { $args{hostname} = hostname };
+  $args{hostname} = 'HOSTNAME_NOT_AVAILABLE' if $@;
+
+  openlog($args{prognam}, "ndelay,pid") if ! $args{foreground};
+
+  bless { %args }, $self;
 }
+
+sub colors     { shift->{colors} }
+sub foreground { shift->{foreground} }
+sub host_name  { shift->{hostname} }
+sub prognam    { shift->{prognam} }
+sub ts_fmt     { shift->{ts_fmt} }
 
 =head1 METHODS
 
@@ -190,12 +197,16 @@ method - wrapper around Net::LDAP::Message->error methods
 
 sub conclude_ldap_err {
   my ( $self, %args ) = @_;
+  my %arg = ( mesg => $args{mesg},
+	      nt   => $args{nt} // 0 );
   $self->cc( pr => 'err',
 	     fm => "LDAP ERROR:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-	     ls => [ 'ERROR: ',        $args{mesg}->error_name,
-		     'TEXT: ',         $args{mesg}->error_text,
-		     'DESCRIPTION: ',  $args{mesg}->error_desc,
-		     'SERVER ERROR: ', $args{mesg}->server_error ] );
+	     ls => [ 'ERROR: ',        $arg{mesg}->error_name,
+		     'TEXT: ',         $arg{mesg}->error_text,
+		     'DESCRIPTION: ',  $arg{mesg}->error_desc,
+		     'SERVER ERROR: ', $arg{mesg}->server_error ] );
+
+  $self->notify( msg => $arg{mesg}->error_desc ) if $arg{nt};
 }
 
 =item B<cc_ldap_err>
@@ -316,6 +327,4 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 =cut
 
 1;
-
-
 

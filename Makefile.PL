@@ -20,6 +20,7 @@ WriteMakefile(NAME             => 'regather',
 				   'Config::Parser::ldap' => '1.00',
 				   'Mail::Tools'          => '2.19',
 				   'Net::LDAP'            => '0.65',
+				   'Net::DNS'             => '1.15',
 				   'Template'             => '2.29',
 				   'Sys::Syslog'          => '0.29'
 				  },

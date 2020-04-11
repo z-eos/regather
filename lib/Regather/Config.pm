@@ -10,6 +10,8 @@ use parent 'Config::Parser::Ini';
 use Carp;
 use File::Basename;
 
+use Regather::Plugin;
+
 use constant LDAP => { opt => { async      => '',
 				debug      => '',
 				inet4      => '',
@@ -78,7 +80,7 @@ Regather::Config - config file processing class
     				    verbose   => $v );
 
     if ( ! defined $cf ) {
-      $log->cc( pr => 'err', fm => "do fix config file ..." );
+      $log->cc( pr => 'err', fm => "%s: do fix config file ..." );
       pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
       exit 1;
     }
@@ -247,8 +249,8 @@ sub mangle {
   if ( $self->is_set(qw(core uid)) ) {
     $item = getpwnam( $self->get(qw(core uid)) );
     if ( defined $item ) {
-      $self->{logger}->cc( pr => 'info', fm => "setuid user %s(%s) confirmed",
-			   ls => [ $self->get(qw(core uid)), $item ] )
+      $self->{logger}->cc( pr => 'info', fm => "%s: setuid user %s(%s) confirmed",
+			   ls => [ __PACKAGE__, $self->get(qw(core uid)), $item ] )
 	if $self->{verbose} > 1;
       $self->set('core', 'uid_number', $item);
     } else {
@@ -260,8 +262,8 @@ sub mangle {
   if ( $self->is_set(qw(core gid)) ) {
     $item = getgrnam( $self->get(qw(core gid)) );
     if ( defined $item ) {
-      $self->{logger}->cc( pr => 'info', fm => "setgid group %s(%s) confirmed",
-			   ls => [ $self->get(qw(core gid)), $item ] )
+      $self->{logger}->cc( pr => 'info', fm => "%s: setgid group %s(%s) confirmed",
+			   ls => [ __PACKAGE__, $self->get(qw(core gid)), $item ] )
 	if $self->{verbose} > 1;
       $self->set('core', 'gid_number', $item);
     } else {
@@ -270,38 +272,59 @@ sub mangle {
     }
   }
 
-  foreach ( $self->names_of('service') ) {
-    if ( $self->is_set(qw($_ uid)) ) {
-      $item = getpwnam( $self->get(qw($_ uid)) );
+  foreach my $svc ( $self->names_of('service') ) {
+    if ( $self->is_set(qw($svc uid)) ) {
+      $item = getpwnam( $self->get(qw($svc uid)) );
       if ( defined $item ) {
-	$self->{logger}->cc( pr => 'info', fm => "setuid user %s(%s) confirmed",
-			     ls => [ $self->get(qw($_ uid)), $item ] )
+	$self->{logger}->cc( pr => 'info', fm => "%s: setuid user %s(%s) confirmed",
+			     ls => [ __PACKAGE__, $self->get(qw($svc uid)), $item ] )
 	  if $self->{verbose} > 1;
-	$self->set($_, 'uid_number', $item);
+	$self->set($svc, 'uid_number', $item);
       } else {
 	print "No user $self->get('uid') found\n\n";
 	exit 2;
       }
     }
 
-    if ( $self->is_set($_, 'gid') ) {
-      $item = getgrnam( $self->get($_, 'gid') );
+    if ( $self->is_set($svc, 'gid') ) {
+      $item = getgrnam( $self->get($svc, 'gid') );
       if ( defined $item ) {
-	$self->{logger}->cc( pr => 'info', fm => "setgid group %s(%s) confirmed",
-			     ls => [ $self->get(qw($_ gid)), $item ] )
+	$self->{logger}->cc( pr => 'info', fm => "%s: setgid group %s(%s) confirmed",
+			     ls => [ __PACKAGE__, $self->get(qw($svc gid)), $item ] )
 	  if $self->{verbose} > 1;
-	$self->set($_, 'gid_number', $item);
+	$self->set($svc, 'gid_number', $item);
       } else {
 	print "No group $self->get('gid') found\n\n";
 	exit 2;
       }
     }
+
+    if ( $self->is_set('service', $svc, 'plugin') ) {
+      foreach my $plg ( $self->get('service', $svc, 'plugin') ) {
+
+	if ( $plg eq 'nsupdate' ) {
+	  if ( ! $self->is_set('service', $svc, 'ns_attr') ) {
+	    print __PACKAGE__, ": service $svc lacks ns_attr option\n";
+	    exit 2;
+	  }
+	}
+
+	if ($plg eq 'configfile' ) {
+	  if ( ! $self->is_set('service', $svc, 'tt_file') ) {
+	    print __PACKAGE__, ": service $svc lacks tt_file option\n";
+	    exit 2;
+	  }
+	}
+
+      }
+    }
+
   }
 
   if ( $self->is_set(qw(core altroot)) ) {
     chdir($self->get(qw(core altroot))) || do {
-      $self->{logger}->cc( pr => 'err', fm => "unable to chdir to %s",
-			   ls => [ $self->get(qw(core altroot)) ] );
+      $self->{logger}->cc( pr => 'err', fm => "%s: unable to chdir to %s",
+			   ls => [ __PACKAGE__, $self->get(qw(core altroot)) ] );
       exit 1;
     };
 
@@ -310,8 +333,8 @@ sub mangle {
 		       substr($self->get('service', $_, 'out_path'), 1),
 		       new Text::Locus(sprintf("in \"%s\" ", $self->get(qw(core altroot))), 1)) ||
 			 exit 1;
-      $self->{logger}->cc( pr => 'debug', fm => "service %s out_path has been changed to %s",
-			   ls => [ $_, $self->get('service', $_, 'out_path') ] )
+      $self->{logger}->cc( pr => 'debug', fm => "%s: service %s out_path has been changed to %s",
+			   ls => [ __PACKAGE__, $_, $self->get('service', $_, 'out_path') ] )
 	if $self->{verbose} > 1;
     }
   } else {
@@ -327,6 +350,8 @@ sub mangle {
 =item config_help
 
 print config lexicon help
+
+output is not sorted, it is in todo
 
 =cut
 
@@ -364,8 +389,8 @@ sub config_help {
 
   if ( $self->{verbose} > 0 ) {
     print "\n\n";
-    $self->{logger}->cc( fg => 1, pr => 'info', fm => "lexicon():%s\n%s",
-			 ls => [ '-' x 70, $lex ] );
+    $self->{logger}->cc( fg => 1, pr => 'info', fm => "%s: lexicon():%s\n%s",
+			 ls => [ __PACKAGE__, '-' x 70, $lex ] );
   }
 }
 
@@ -459,6 +484,19 @@ sub chk_depend_notify {
   return 1;
 }
 
+=item chk_plugin
+
+check plugin name against existent plugins list
+
+=cut
+
+sub chk_plugin {
+  my ($self, $valref, $prev_value, $locus) = @_;
+  my %names = Regather::Plugin->names;
+  $self->{plugin_names} //= [ keys(%names) ];
+  0 < grep { $$valref eq $_ } @{$self->{plugin_names}} ? return 1 : return 0;
+}
+
 =item error
 
 error handler
@@ -471,8 +509,8 @@ sub error {
   local %_ = @_;
   my $locus = $_{locus} ? $_{locus} . ': ' : '';
   $self->{logger}->cc( pr => 'err',
-		       fm => "config parser error: %s%s",
-		       ls => [ $locus, $err ] );
+		       fm => "%s: config parser error: %s%s",
+		       ls => [ __PACKAGE__, $locus, $err ] );
 }
 
 
@@ -500,17 +538,20 @@ Each I<service> must have these options:
 =over 4
 
 1. at least one (can be set multiple times, and in that case all of
-them are checked) option I<ctrl_attr> which contains name of the
-attribute to check in event LDAP object. In case it is present, the
-object is considered to be processed, in case it is absent, we skip
-that event (since LDAP object has no I<ctrl_attr>)
+   them are checked) option I<ctrl_attr> which contains name of the
+   attribute to check in event LDAP object. In case it is present,
+   the object is considered to be processed, in case it is absent,
+   we skip that event (since LDAP object has no I<ctrl_attr>)
 
 2. one I<ctrl_srv_re> option which is regular expression to match
-service against LDAP event object DN
+   service against LDAP event object DN
+
+3. at least one I<plugin> option.
+   B<This option should be placed in the end of the section>
 
 =back
 
-If both checks are positive, then object considered to be processed
+If both, 1. and 2. checks are positive, then object considered to be processed
 for that service.
 
 Each I<service> must have atleast one of two possible maps. Those maps
@@ -636,15 +677,22 @@ chown	     = NUMBER :default 1
 ctrl_attr    = STRING :mandatory :array
 ctrl_srv_re  = STRING :mandatory
 gid          = STRING
-notify       = NUMBER :default 0 :check=chk_depend_notify
 out_ext      = STRING
 out_file     = STRING
 out_file_pfx = STRING
 out_path     = STRING :check=chk_dir
+tt_file      = STRING :check=chk_file_tt
+uid          = STRING
+ns_attr      = STRING
+ns_keyfile   = STRING
+ns_ttl       = NUMBER :default 600
+ns_txt_pfx   = STRING :default REGATHER:
+ns_server    = STRING :array
+ns_zone      = STRING :array
+plugin       = STRING :mandatory :array :check=chk_plugin
+notify       = NUMBER :default 0 :check=chk_depend_notify
 post_process = STRING :array
 skip         = NUMBER :default 0
-tt_file      = STRING :mandatory :check=chk_file_tt
-uid          = STRING
 
 [service ANY map s]
 ANY          = STRING

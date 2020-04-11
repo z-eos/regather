@@ -15,9 +15,6 @@ use IPC::Open2;
 use File::Temp;
 use File::Basename;
 
-use Regather::Config;
-use Regather::Logg;
-
 use Net::LDAP;
 use Net::LDAP::LDIF;
 use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
@@ -33,11 +30,15 @@ use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 use Net::LDAP::Control::SyncRequest;
 use Net::LDAP::Util qw(generalizedTime_to_time);
 
+use Regather::Config;
+use Regather::Logg;
+use Regather::Plugin;
+
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-our $VERSION    = '0.76';
+our $VERSION   = '0.79.90';
 
 our $v      = 0;
 our $fg     = 0;
@@ -48,6 +49,7 @@ my $config  = '/usr/local/etc/regather.conf';
 my $ts_fmt  = "%a %F %T %Z (%z)";
 my $cli;
 my $ch;
+my $plugin_list = 0;
 
 my $get_opt_res =
   GetOptions(
@@ -58,9 +60,15 @@ my $get_opt_res =
 	     'C|cli=s%'     => \$cli,
 	     'S|strict'     => \$strict,
 	     'config-help'  => \$ch,
+	     'plugin-list'  => \$plugin_list,
 	     'v+'           => \$v,
 	     'h'            => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
 	    );
+
+if ( $plugin_list ) {
+  Regather::Plugin->new( 'list' )->run;
+  exit 0;
+}
 
 my $log = new Regather::Logg( prognam    => $PROGNAM,
 			      foreground => $fg,
@@ -81,7 +89,7 @@ if ( defined $fm_msg ) {
 
 $log->cc( pr => 'info', fm => "Regather::Logg initialized ..." ) if $v > 1;
 
-$log->cc( pr => 'info', fm => "options provided from CLI:\n%s", ls => [ $cli ] )
+$log->cc( pr => 'info', fm => "%s: options provided from CLI:\n%s", ls => [ __PACKAGE__, $cli ] )
   if keys( %{$cli} ) && $v > 1;
 
 my $cf = new Regather::Config ( filename  => $config,
@@ -90,7 +98,7 @@ my $cf = new Regather::Config ( filename  => $config,
 				verbose   => $v );
 
 if ( ! defined $cf ) {
-  $log->cc( pr => 'err', fm => "do fix config file ..." );
+  $log->cc( pr => 'err', fm => "%s: do fix config file ..." );
   pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
   exit 1;
 }
@@ -101,15 +109,15 @@ if ( $ch ) {
 }
 
 $log->set_m( $cf->getnode('log')->as_hash );
-$log->set( notify => [ $cf->get('core', 'notify') ] );
+$log->set( notify       => [ $cf->get('core', 'notify') ] );
 $log->set( notify_email => [ $cf->get('core', 'notify_email') ] );
 
-$log->cc( pr => 'info', fm => "Dry Run is set on, no file is to be changed\n" )
+$log->cc( pr => 'info', fm => "%s: Dry Run is set on, no file is to be changed\n" )
   if $cf->get(qw(core dryrun));
-$log->cc( pr => 'info', fm => "Config::Parse object as hash:\n%s",
-	  ls => [ $cf->as_hash ] ) if $v > 3;
-$log->cc( pr => 'info', fm => "%s v.%s is starting ...",
-	  ls => [ $PROGNAM, $VERSION, ] );
+$log->cc( pr => 'info', fm => "%s: Config::Parse object as hash:\n%s",
+	  ls => [ __PACKAGE__, $cf->as_hash ] ) if $v > 3;
+$log->cc( pr => 'info', fm => "%s: %s v.%s is starting ...",
+	  ls => [ __PACKAGE__, $PROGNAM, $VERSION, ] );
 
 our @svc = grep { $cf->get('service', $_, 'skip') != 1 } $cf->names_of('service');
 
@@ -156,8 +164,8 @@ our $last_forever = 1;
 while ( $last_forever ) {
   if ( $cf->is_set(qw(core altroot)) ) {
     chdir($cf->get(qw(core altroot))) || do {
-      $log->cc( pr => 'err', fm => "main: unable to chdir to %s",
-		ls => [ $cf->get(qw(core altroot)) ] );
+      $log->cc( pr => 'err', fm => "%s: main: unable to chdir to %s",
+		ls => [ __PACKAGE__, $cf->get(qw(core altroot)) ] );
       exit 1;
     };
   }
@@ -165,8 +173,8 @@ while ( $last_forever ) {
   $ldap = Net::LDAP->new( $uri,
 			  @{[ map { $_ => $ldap_opt->{$_} } %$ldap_opt ]} )
     || do {
-      $log->cc( pr => 'err', fm => "Unable to connect to %s; error: %s",
-		ls => [ $uri, $! ] );
+      $log->cc( pr => 'err', fm => "%s: Unable to connect to %s; error: %s",
+		ls => [ __PACKAGE__, $uri, $! ] );
       if ( $strict ) {
 	exit LDAP_CONNECT_ERROR;
       } else {
@@ -182,14 +190,14 @@ while ( $last_forever ) {
 	$ldap->start_tls( @{[ map { $_ => $start_tls_options->{$_} } %$start_tls_options ]} );
     };
     if ( $@ ) {
-      $log->cc( pr => 'err', fm => "TLS negotiation failed: %s", ls => [ $! ] );
+      $log->cc( pr => 'err', fm => "%s: TLS negotiation failed: %s", ls => [ __PACKAGE__, $! ] );
       if ( $strict ) {
 	exit LDAP_CONNECT_ERROR;
       } else {
 	next;
       }
     } else {
-      $log->cc( pr => 'info', fm => "TLS negotiation succeeded" ) if $v > 1;
+      $log->cc( pr => 'info', fm => "%s: TLS negotiation succeeded" ) if $v > 1;
     }
   }
 
@@ -203,7 +211,9 @@ while ( $last_forever ) {
       }
       $mesg = $ldap->bind( @bind_options );
       if ( $mesg->code ) {
-	$log->cc( pr => 'err', fm => "bind error: %s", ls => [ $mesg->error ] );
+	####### !!!!!!! TODO: to implement exponential delay on error sending to awoid log file/notify
+	####### !!!!!!! queue overflow
+	$log->cc( pr => 'err', fm => "%s: bind error: %s", ls => [ __PACKAGE__, $mesg->error ] );
 	if ( $strict ) {
 	  exit $mesg->code;
 	} else {
@@ -228,18 +238,19 @@ while ( $last_forever ) {
 		       );
   if ( $mesg->code ) {
     $log->cc( pr => 'err',
-	      fm => "LDAP search ERROR...\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-	      ls => [
-		     'base: ',         $cf->get(qw(ldap srch base)),
-		     'scope: ',        $cf->get(qw(ldap srch scope)),
-		     'filter: ',       $cf->get(qw(ldap srch filter)),
-		     'attrs: ',        join("\n", @{$cfgattrs}) ] );
+	      fm => "%s: LDAP search ERROR...\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+	      ls => [ __PACKAGE__,
+		      'base: ',         $cf->get(qw(ldap srch base)),
+		      'scope: ',        $cf->get(qw(ldap srch scope)),
+		      'filter: ',       $cf->get(qw(ldap srch filter)),
+		      'attrs: ',        join("\n", @{$cfgattrs}) ] );
     $log->cc_ldap_err( mesg => $mesg );
     exit $mesg->code if $strict;
   } else {
     $log->cc( pr => 'info',
-	      fm => "LDAP search:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-	      ls => [ 'base: ',   $cf->get(qw(ldap srch base)),
+	      fm => "%s: LDAP search:\n% 13s%s\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+	      ls => [ __PACKAGE__,
+		      'base: ',   $cf->get(qw(ldap srch base)),
 		      'scope: ',  $cf->get(qw(ldap srch scope)),
 		      'filter: ', $cf->get(qw(ldap srch filter)),
 		      'attrs: ',  join("\n", @{$cfgattrs}) ] ) if $v > 2;
@@ -280,12 +291,12 @@ sub daemonize {
 
     $orphaned_pid_mtime = strftime( $ts_fmt, localtime( (stat( $cf->get(qw(core pid_file)) ))[9] ));
     if ( unlink $cf->get(qw(core pid_file)) ) {
-      $log->cc( pr => 'debug', fm => "orphaned %s was removed",
-		ls => [ $cf->get(qw(core pid_file)) ] )
+      $log->cc( pr => 'debug', fm => "%s: orphaned %s was removed",
+		ls => [ __PACKAGE__, $cf->get(qw(core pid_file)) ] )
 	if $v > 0;
     } else {
-      $log->cc( pr => 'err', fm => "orphaned %s (mtime: %s) was not removed: %s",
-		ls => [ $cf->get(qw(core pid_file)), $orphaned_pid_mtime, $! ] );
+      $log->cc( pr => 'err', fm => "%s: orphaned %s (mtime: %s) was not removed: %s",
+		ls => [ __PACKAGE__, $cf->get(qw(core pid_file)), $orphaned_pid_mtime, $! ] );
       exit 2;
     }
 
@@ -311,22 +322,22 @@ sub daemonize {
   }
 
   $SIG{HUP}  = sub { my $sig = @_;
-		     $log->cc( pr => 'warning', fm => "SIG $sig received, restarting" );
+		     $log->cc( pr => 'warning', fm => "%s: SIG $sig received, restarting" );
 		     exec('perl', @DAEMONARGS); };
   $SIG{INT} = $SIG{QUIT} = $SIG{ABRT} = $SIG{TERM} =
     sub { my $sig = @_;
-	  $log->cc( pr => 'warning', fm => " SIG $sig received, exiting" );
+	  $log->cc( pr => 'warning', fm => "%s:  SIG $sig received, exiting" );
 	  $last_forever = 0;};
   $SIG{PIPE} = 'ignore';
   $SIG{USR1} = sub { my $sig = @_;
-		     $log->cc( pr => 'warning', fm => "SIG $sig received, doing nothing" ) };
+		     $log->cc( pr => 'warning', fm => "%s: SIG $sig received, doing nothing" ) };
 
   if ( $cf->is_set(qw(core uid)) && $cf->is_set(qw(core gid)) ) {
     setgid ( $cf->get(qw(core gid_number)) ) || do { print "setgid went wrong: $!\n\n"; exit 1; };
     setuid ( $cf->get(qw(core uid_number)) ) || do { print "setuid went wrong: $!\n\n"; exit 1; };
   }
 
-  $log->cc( pr => 'info', fm => "%s v.%s is started.", ls => [ $PROGNAM, $VERSION ] );
+  $log->cc( pr => 'info', fm => "%s: %s v.%s is started.", ls => [ __PACKAGE__, $PROGNAM, $VERSION ] );
 }
 
 sub ldap_search_callback {
@@ -335,33 +346,32 @@ sub ldap_search_callback {
   my @controls = $msg->control;
   my $syncstate = scalar @controls ? $controls[0] : undef;
 
-  my ( $s, $st, $mesg, $entry, @entries, $ldif, $tt_vars, $map,
-       %out_paths, $out_file_pfx, $out_file, $out_file_pfx_old, $out_file_old, $dir, $out_to,
+  my ( $s, $st, $mesg, $entry, @entries, $ldif, $map,
+       $out_file_pfx_old, $out_file_old,
        $tmp_debug_msg,
        $rdn, $rdn_old, $rdn_re,
        $pp, $chin, $chou, $chst, $cher, $email, $email_body );
 
-  $log->cc( pr => 'debug', fm => "syncstate: %s", ls => [ $syncstate ] )
+  $log->cc( pr => 'debug', fm => "%s: syncstate: %s", ls => [ __PACKAGE__, $syncstate ] )
     if $v > 5;
-  $log->cc( pr => 'debug', fm => "object: %s", ls => [ $obj ] ) if $v > 5;
+  $log->cc( pr => 'debug', fm => "%s: object: %s", ls => [ __PACKAGE__, $obj ] ) if $v > 5;
 
   if ( defined $obj && $obj->isa('Net::LDAP::Entry') ) {
     $rdn = ( split(/=/, ( split(/,/, $obj->dn) )[0]) )[0];
     if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
-      $log->cc( pr => 'debug', fm => "SYNCSTATE:\n%s:", ls => [ $syncstate ] )
+      $log->cc( pr => 'debug', fm => "%s: SYNCSTATE:\n%s:", ls => [ __PACKAGE__, $syncstate ] )
 	if $v > 4;
       $st = $syncstate->state;
       my %reqmod;
-      $log->cc( fm => "received control %s: dn: %s", ls => [ SYNST->[$st], $obj->dn ] );
+      $log->cc( fm => "%s: received control %s: dn: %s", ls => [ __PACKAGE__, SYNST->[$st], $obj->dn ] );
 
       #######################################################################
       ####### --- PRELIMINARY STUFF ----------------------------->>>>>>>>> 0
       #######################################################################
 
-      ### LDAP_SYNC_DELETE arrives for both cases, object deletetion
-      ### and attribute deletion and in both cases Net::LDAP::Entry
-      ### provided contains only DN, so, we need to "re-construct"
-      ### it for further processing
+      ### LDAP_SYNC_DELETE arrives for both cases, object deletetion and attribute
+      ### deletion and in both cases Net::LDAP::Entry provided contains only DN,
+      ### so, we need to "re-construct" it for further processing
       if ( $st == LDAP_SYNC_DELETE ) {
 	$mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
 			       scope    => 'sub',
@@ -370,8 +380,8 @@ sub ldap_search_callback {
 			       filter   => '(reqDN=' . $obj->dn . ')', );
 	if ( $mesg->code ) {
 	  $log->cc( pr => 'err', nt => 1,
-		    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		    ls => [ SYNST->[$st],
+		    fm => "%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		    ls => [ __PACKAGE__, SYNST->[$st],
 			    'base: ',   $cf->get(qw(ldap srch log_base)),
 			    'scope: ',  'sub',
 			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
@@ -382,8 +392,8 @@ sub ldap_search_callback {
 
 	  if ( ! $entry->isa('Net::LDAP::Entry') ) {
 	    $log->cc( pr => 'err', nt => 1,
-		      fm => "LDAP accesslog search on %s, returned no result:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		      ls => [ SYNST->[$st],
+		      fm => "%s: LDAP accesslog search on %s, returned no result:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		      ls => [ __PACKAGE__, SYNST->[$st],
 			      'base: ',   $cf->get(qw(ldap srch log_base)),
 			      'scope: ',  'sub',
 			      'filter: ', '(reqDN=' . $obj->dn . ')' ] );
@@ -397,20 +407,19 @@ sub ldap_search_callback {
 	    my ( $file, @err );
 	    open( $file, "<", \$reqold) ||
 	      $log->cc( pr => 'err',
-			fm => "Cannot open data from variable to read ldif: %s",
-			ls => [ $! ] );
+			fm => "%s: Cannot open data from variable to read ldif: %s",
+			ls => [ __PACKAGE__, $! ] );
 	    $ldif = Net::LDAP::LDIF->new( $file, "r", onerror => 'warn' );
 	    while ( not $ldif->eof ) {
 	      $entry = $ldif->read_entry;
-	      $log->cc( pr => 'err', fm => "Reading LDIF error: %s",
-			ls => [ $ldif->error ] ) if $ldif->error;
+	      $log->cc( pr => 'err', fm => "%s: Reading LDIF error: %s",
+			ls => [ __PACKAGE__, $ldif->error ] ) if $ldif->error;
 	    }
 	    $obj = $entry;
 	    $ldif->done;
 	  } elsif ( $entry->get_value('reqType') eq 'modify' ) {
-	    ### here we re-assemble $obj to have all attributes before deletion
-	    ### and since after that it'll has ctrl_attr but reqType=delete,
-	    ### it'll go to $st == LDAP_SYNC_DELETE
+	    ### here we re-assemble $obj to have all attributes before deletion and since
+	    ### after that it'll has ctrl_attr but reqType=delete, it'll go to $st == LDAP_SYNC_DELETE
 	    %reqmod = map  { substr($_, 0, -2) => 1 } grep { /^(.*):-$/g }
 	      @{$entry->get_value('reqMod', asref => 1)};
 
@@ -419,8 +428,8 @@ sub ldap_search_callback {
 				   filter => '(objectClass=*)', );
 	    if ( $mesg->code ) {
 	      $log->cc( pr => 'err', nt => 1,
-			fm => "LDAP search %s %s error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			ls => [ SYNST->[$st], 'reqType=modify',
+			fm => "%s: LDAP search %s %s error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			ls => [ __PACKAGE__, SYNST->[$st], 'reqType=modify',
 				'base: ',     $cf->get(qw(ldap srch log_base)),
 				'scope: ',    'sub',
 				'filter: ',   '(reqDN=' . $obj->dn . ')' ] );
@@ -431,8 +440,8 @@ sub ldap_search_callback {
 	      $obj->add( map { $_ => $reqmod{$_} } keys %reqmod );
 	      # $obj->add( $_ => $reqmod{$_} ) foreach ( keys %reqmod );
 	    }
-	    $log->cc( pr => 'debug', fm => "%s reqType=modify reqMod: %s",
-		      ls => [ SYNST->[$st], \%reqmod ] )	if $v > 3;
+	    $log->cc( pr => 'debug', fm => "%s: %s reqType=modify reqMod: %s",
+		      ls => [ __PACKAGE__, SYNST->[$st], \%reqmod ] )	if $v > 3;
 	  }
 	}
       } elsif ( $st == LDAP_SYNC_MODIFY ) {
@@ -443,26 +452,23 @@ sub ldap_search_callback {
 			       filter   => '(reqDN=' . $obj->dn . ')', );
 	if ( $mesg->code ) {
 	  $log->cc( pr => 'err', nt => 1,
-		    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		    ls => [ SYNST->[$st], nt => 1,
+		    fm => "%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+		    ls => [ __PACKAGE__, SYNST->[$st], nt => 1,
 			    'base: ',   $cf->get(qw(ldap srch log_base)),
 			    'scope: ',  'sub',
 			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
 	  $log->cc_ldap_err( mesg => $mesg );
 	} else {
 	  if ( $mesg->count > 0 ) {
-	    ### modified object has accesslog records when it was
-	    ### add/modify/delete before, as well as ModRDN ... so, we
-	    ### need to be sure, there is no accesslog object with
-	    ### reqNewRDN=<$obj->dn RDN> close to the processing time
-	    ### of this $obj
+	    ### modified object has accesslog records when it was add/modify/delete
+	    ### before, as well as ModRDN ... so, we need to be sure, there is no accesslog
+	    ### object with reqNewRDN=<$obj->dn RDN> close to the processing time of this $obj
 
 	    ### NEED TO BE FINISHED
 
 	  } elsif ( $mesg->count == 0 ) {
-	    ### modified object has no accesslog records when it was
-	    ### ModRDN-ed so, we search for accesslog object with
-	    ### reqNewRDN=<$obj->dn RDN> to know old object RDN to use
+	    ### modified object has no accesslog records when it was ModRDN-ed so, we search
+	    ### for accesslog object with reqNewRDN=<$obj->dn RDN> to know old object RDN to use
 	    ### it further for $out_file
 	    $mesg = $ldap->search( base     => $cf->get(qw(ldap srch log_base)),
 				   scope    => 'sub',
@@ -471,17 +477,16 @@ sub ldap_search_callback {
 				   filter   => '(reqNewRDN=' . (split(/,/, $obj->dn))[0] . ')', );
 	    if ( $mesg->code ) {
 	      $log->cc( pr => 'err', nt => 1,
-			fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			ls => [ SYNST->[$st],
+			fm => "%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			ls => [ __PACKAGE__, SYNST->[$st],
 				'base: ',   $cf->get(qw(ldap srch log_base)),
 				'scope: ',  'sub',
 				'filter: ', '(reqNewRDN=' . (split(/,/, $obj->dn))[0] . ')' ] );
 	      $log->cc_ldap_err( mesg => $mesg );
 	      # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
 	    } else {
-	      ### here we pick last reqNewRDN entry, to find the
-	      ### latest UUID for entries with same DN if the object
-	      ### was added/deleted/ModRDN-ed several times
+	      ### here we pick last reqNewRDN entry, to find the latest UUID for entries
+	      ### with same DN if the object was added/deleted/ModRDN-ed several times
 	      @entries = $mesg->sorted;
 	      $entry = pop @entries;
 	      if ( defined $entry ) {
@@ -498,8 +503,8 @@ sub ldap_search_callback {
 							   $entry->get_value('reqEntryUUID')) );
 		if ( $mesg->code ) {
 		  $log->cc( pr => 'err', nt => 1,
-			    fm => "LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			    ls => [ SYNST->[$st],
+			    fm => "%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			    ls => [ __PACKAGE__, SYNST->[$st],
 				    'base: ',   $cf->get(qw(ldap srch log_base)),
 				    'scope: ',  'sub',
 				    'filter: ', sprintf("(reqEntryUUID=%s)",
@@ -509,22 +514,20 @@ sub ldap_search_callback {
 		} else {
 		  @entries = $mesg->sorted;
 		  if ( $entries[0]->get_value('reqType') eq 'add' ) {
-		    ### here we re-assemble $obj to have all attributes on its creation
-		    ### except RDN, which we'll set from next to the last element
-		    ### and since after that it'll has ctrl_attr but reqType=add,
-		    ### it'll go to $st == LDAP_SYNC_DELETE
+		    ### here we re-assemble $obj to have all attributes on its creation except RDN,
+		    ### which we'll set from next to the last element and since after that it'll has
+		    ### ctrl_attr but reqType=add, it'll go to $st == LDAP_SYNC_DELETE
 		    $obj->add( map { /^(.*):\+ (.*)$/g } @{$entry->get_value('reqMod', asref => 1)} );
 		    $obj->replace( $rdn => $entries[scalar(@entries) - 2]->get_value($rdn) );
 		  } else {
 		    $log->cc( pr => 'err', nt => 1,
-			      fm => "%s object (before ModRDN) to delete not found! accesslog reqType=add object nod found\n\nobject reqEntryUUID=%s should be processed manually",
-			      ls => [ SYNST->[$st], $entry->get_value('reqEntryUUID') ] );
+			      fm => "%s: %s object (before ModRDN) to delete not found! accesslog reqType=add object nod found\n\nobject reqEntryUUID=%s should be processed manually",
+			      ls => [ __PACKAGE__, SYNST->[$st], $entry->get_value('reqEntryUUID') ] );
 		  }
 		}
 	      } else {
-		$log->cc( pr => 'err', nt => 1,
-			  fm => "LDAP accesslog search on %s object returned no result\n\n",
-			  ls => [ SYNST->[$st] ] );
+		$log->cc( pr => 'err', nt => 1, ls => [ __PACKAGE__, SYNST->[$st] ],
+			  fm => "%s: LDAP accesslog search on %s object returned no result\n\n" );
 	      }
 	    }
 	  }
@@ -544,342 +547,83 @@ sub ldap_search_callback {
 	  }
 	}
 	$ctrl_srv_re = $cf->get('service', $_, 'ctrl_srv_re');
-	if ( $is_ctrl_attr > 0 &&
-	     $is_ctrl_attr == scalar( @{$cf->get('service', $_, 'ctrl_attr')} ) &&
-	     $obj->dn =~ qr/$ctrl_srv_re/ ) {
+	if ( $is_ctrl_attr > 0 && $obj->dn =~ qr/$ctrl_srv_re/ &&
+	     $is_ctrl_attr == scalar( @{$cf->get('service', $_, 'ctrl_attr')} ) ) {
 	  $s = $_;
 	}
       }
 
       if ( ! defined $s ) {
-	$log->cc( pr => 'warning',
-		  fm => "dn: %s is not configured to be processed on control: %s",
-		  ls => [ $obj->dn, SYNST->[$st] ] )
+	$log->cc( pr => 'warning', ls => [ __PACKAGE__, $obj->dn, SYNST->[$st] ],
+		  fm => "%s: dn: %s is not configured to be processed on control: %s" )
 	  if $v > 2;
 	return;
       }
-
-      ### PREPARING OUTPUT RELATED VARIABLES
-      %out_paths = out_paths( cf => $cf, obj => $obj, s => $s, rdn => $rdn );
-      return if ! %out_paths;
-      $out_file_pfx = $out_paths{out_file_pfx} if exists $out_paths{out_file_pfx};
-      $out_file     = $out_paths{out_file}     if exists $out_paths{out_file};
-      $dir = $out_file_pfx // $cf->get('service', $s, 'out_path');
-      $out_to = $dir . '/' . $out_file;
-
-      $log->cc( pr => 'debug', fm => "output directory: %s; file: %s",
-		ls => [ $dir, $out_file ] ) if $v > 2;
 
       #######################################################################
       ####### --------------------------------------------------->>>>>>>>> 1
       #######################################################################
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
 
-	if ( defined $out_file_old ) {
-	  if ( unlink $dir . '/' . $out_file_old ) {
-	    $log->cc( pr => 'info', fm => "file %s deleted (after ModRDN)",
-		      ls => [ $dir . '/' . $out_file_old ] );
-	  } else {
-	    $log->cc( pr => 'err', fm => "%s not removed (after ModRDN); error: %s",
-		      ls => [ $dir . '/' . $out_file_old, $! ], nt => 1, );
-	  }
-	}
-
-	### COLLECTING ALL MAPPED ATTRIBUTES VALUES
-	foreach my $i ( ( 'm', 's') ) {
-	  if ( $cf->is_section('service', $s, 'map', $i) ) {
-	    foreach my $j ( $cf->names_of('service', $s, 'map', $i) ) {
-	      if ( $i eq 's' && ! $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
-		if ( $cf->get(qw(core dryrun)) ) {
-		  $log->cc( pr => 'debug', fm => "DRYRUN: %s to be deleted (no attribute: %s)",
-			    ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j) ] );
-		} else {
-		  if ( unlink $out_to ) {
-		    $log->cc( pr => 'debug', fm => "file %s deleted (no attribute: %s)",
-			      ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j) ] )
-		      if $v > 0;
-		  } else {
-		    $log->cc( pr => 'err', fm => "%s not removed (no attribute: %s); error: ",
-			      ls => [ $out_to, $cf->get('service', $s, 'map', $i, $j), $! ],
-			      nt => 1, );
-		  }
-		}
-
-		### if any of `map s` attributes doesn't exist, we delete that config file
-		### preliminaryly and skip that attribute from been processed by Template
-		next;
-
-	      } elsif ( $i eq 'm' && $obj->exists( $cf->get('service', $s, 'map', $i, $j)) ) {
-		$tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j),
-						  asref => 1 );
-	      } else {
-		if ( $j =~ /certificateRevocationList/ ) {
-		  $tt_vars->{$j} =
-		    opensslize({ in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
-		} elsif ( $j =~ /cACertificate/ ) {
-		  $tt_vars->{$j} =
-		    opensslize({ cmd => 'x509', in => $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) });
-		} else {
-		  $tt_vars->{$j} = $obj->get_value( $cf->get('service', $s, 'map', $i, $j) ) // 'NA';
-		}
-	      }
-	    }
-	  }
-	}
-	$tt_vars->{prog}       = sprintf("%s v.%s", $PROGNAM, $VERSION);
-	$tt_vars->{DN}         = $obj->dn;
-	$tt_vars->{date}       = strftime( $ts_fmt, localtime(time));
-	$tt_vars->{descr}      = $obj->get_value('description')
-	  if $obj->exists('description');
-	$tt_vars->{server}     = ( split(/\@/, $obj->get_value('authorizedService')) )[1]
-	  if $obj->exists('authorizedService');
-	$tt_vars->{createdby}  =
-	  ( split(/=/, ( split(/,/, $obj->get_value('creatorsName')) )[0]) )[1];
-	$tt_vars->{modifiedby} =
-	  ( split(/=/, ( split(/,/, $obj->get_value('modifiersName')) )[0]) )[1];
-
-	if ( ! $force && -e $out_to &&
-	     ( generalizedTime_to_time($obj->get_value('modifyTimestamp'))
-	       <
-	       (stat($out_to))[9] ) ) {
-	  $log->cc( pr => 'debug',
-		    fm => "skip. object %s is older than target file %s, (object modifyTimestamp: %s is older than file mtime: %s",
-		    ls => [ $obj->dn, $out_to,
-			    strftime( "%F %T",
-				      localtime(generalizedTime_to_time($obj->get_value('modifyTimestamp')))),
-			    strftime( "%F %T", localtime((stat($out_to))[9])),
-			  ] )
-	    if $v > 0;
-	  return;
-	}
-
-	### PICKING ROOT OBJECT RDN (IN OUR CASE IT IS "UID")
-	foreach ( reverse split(/,/, $obj->dn) ) {
-	  next if $_ !~ /^uid=/;
-	  $tt_vars->{uid} = ( split(/=/, $_) )[1];
-	  last;
-	}
-
-	### DRYRUN
-	if ( $cf->get(qw(core dryrun)) ) {
-
-	  $log->cc( pr => 'debug', fm => "DRYRUN: %s -> %s",
-		    ls => [
-			   sprintf("%s/%s", $cf->get(qw(core tt_path)),
-				   $cf->get('service', $s, 'tt_file')),
-			   $dir. '/' . $out_file
-			  ] );
-
-	  if ( $cf->is_set($s, 'chmod') ) {
-	    $log->cc( pr => 'err', fm => "DRYRUN: chmod %s, %s",
-		      ls => [ $cf->get('service', $s, 'chmod'), $out_to ] );
-	  } elsif ( $cf->is_set(qw(core chmod)) ) {
-	    $log->cc( pr => 'err', fm => "DRYRUN: chmod %s, %s",
-		      ls => [ $cf->get('core', 'chmod'), $out_to ] );
-	  }
-
-	  if ( $cf->is_set($s, 'chown') ) {
-	    $log->cc( pr => 'err', fm => "DRYRUN: chown %s, %s, %s",
-		      ls => [ $obj->get_value('uidNumber'),
-			      $obj->get_value('gidNumber'),
-			      $out_to ] );
-	  }
-	  return;
-	}
-
-	my ( $tmp_fh, $tmp_fn );
-	eval { $tmp_fh = File::Temp->new( UNLINK => 0, DIR => $dir ); };
-	if ( $@ ) {
-	  $log->cc( pr => 'err', fm => "File::Temp->new( DIR => %s ); service \"%s\"; err: \"%s\"",
-		    ls => [ $dir, $s, $@ ] );
-	  return;
-	}
-	$tmp_fn = $tmp_fh->filename;
-	my $tt = Template->new( TRIM        => $cf->get(qw(core tt_trim)),
-				ABSOLUTE    => 1,
-				RELATIVE    => 1,
-				OUTPUT_PATH => $dir,
-				DEBUG       => $fg // $cf->get(qw(core tt_debug)) );
-
-	$log->cc( pr => 'err', fm => "Template->new( OUTPUT_PATH => %s ) for service %s error: %s",
-		  ls => [ $dir, $s, $! ] )
-	  if ! defined $tt;
-
-	$tt->process( sprintf("%s/%s",
-			      $cf->get(qw(core tt_path)),
-			      $cf->get('service', $s, 'tt_file')),
-		      $tt_vars,
-		      $tmp_fh ) || do {
-			$log->cc( pr => 'err', fm => "%s .tt process error: %s",
-				  ls => [ SYNST->[$st], $tt->error ] );
-			return;
-		      };
-
-	close( $tmp_fh ) || do {
-	  $log->cc( pr => 'err', fm => "close file (opened for writing), service %s, failed: %s",
-		    ls => [ $s, $! ] );
-	  next;
-	};
-
-	if ( $cf->get(qw(core dryrun)) ) {
-	  $log->cc( pr => 'debug', fm => "DRYRUN: rename %s should be renamed to %s",
-		    ls => [ $tmp_fn, $out_file ] );
-	} else {
-	  rename $tmp_fn, $out_to ||
-	    $log->cc( pr => 'err', fm => "rename %s to %s, failed",
-		      ls => [ $tmp_fn, $out_to ] );
-
-	  if ( -e $out_to ) {
-	    if ( $cf->is_set('service', $s, 'chmod') ) {
-	      chmod oct($cf->get('service', $s, 'chmod')), $out_to ||
-		$log->cc( pr => 'err', fm => "chmod for %s failed",
-			  ls => [ $out_to ] );
-	    } elsif ( $cf->is_set(qw(core chmod)) ) {
-	      chmod oct($cf->(qw(core chmod))), $out_to ||
-		$log->cc( pr => 'err', fm => "chmod for %s failed",
-			  ls => [ $out_to ] );
-	    }
-
-	    if ( $cf->is_set('service', $s, 'chown') ) {
-	      chown $obj->get_value('uidNumber'),
-		$obj->get_value('gidNumber'),
-		$out_to ||
-		$log->cc( pr => 'err', fm => "chown (%s:%s) %s failed",
-			  ls => [ $obj->get_value('uidNumber'),
-				  $obj->get_value('gidNumber'),
-				  $out_to ] );
-	    }
-	  } else {
-	    $log->cc( pr => 'err', fm => "%s disappeared, no such file any more...",
-		      ls => [ $out_to ] );
-	  }
-	}
-	$log->cc( pr => 'debug', fm => "control %s: dn: %s processed successfully.",
-		  ls => [ SYNST->[$st], $obj->dn ] );
-
-	if ( $cf->is_set('service', $s, 'post_process') ) {
-	  foreach $pp ( @{$cf->get('service', $s, 'post_process')} ) {
-	    my $pid = open2( $chou, $chin, $pp );
-	    waitpid( $pid, 0 );
-	    $chst = $? >> 8;
-	    if ( $chst ) {
-	      $cher .= $_ while ( <$chou> );
-	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ], nt => 1,
-			fm => "service %s post_process: %s, error: %s", );
-	    }
-	  }
+	# Regather::Plugin->new( 'args', { log    => $log,
+	# 				 params => [ 1, 2, 3]} )->run;
+	foreach my $svc ( @{$cf->get('service', $s, 'plugin')} ) {
+	  Regather::Plugin->new( $svc, {
+					cf           => $cf,
+					force        => $force,
+					log          => $log,
+					obj          => $obj,
+					out_file_old => $out_file_old,
+					prog         => sprintf("%s v.%s", $PROGNAM, $VERSION),
+					rdn          => $rdn,
+					s            => $s,
+					st           => $st,
+					ts_fmt       => $ts_fmt,
+					v            => $v,
+				       } )->ldap_sync_add_modify;
 	}
 
 	#######################################################################
 	####### --------------------------------------------------->>>>>>>>> 2
 	#######################################################################
       } elsif ( $st == LDAP_SYNC_DELETE ) {
-	if ( $cf->get(qw(core dryrun)) ) {
-	  $log->cc( pr => 'debug', fm => "DRYRUN: file %s should be deleted",
-		    ls => [ $out_to ] );
-	} else {
-	  if ( unlink $out_to ) {
-	    $log->cc( pr => 'debug', fm => "file %s was successfully deleted",
-		      ls => [ $out_to ] )
-	      if $v > 0;
-	  } else {
-	    $log->cc( pr => 'err', fm => "file %s was not removed; error: ",
-		      ls => [ $out_to, $! ] );
-	  }
-	}
-	$log->cc( pr => 'debug', fm => "control %s: dn: %s processed successfully..",
-		  ls => [ SYNST->[$st], $obj->dn ] );
 
-	if ( $cf->is_set('service', $s, 'post_process') ) {
-	  foreach $pp ( @{$cf->get('service', $s, 'post_process')} ) {
-	    my $pid = open2( $chou, $chin, $pp );
-	    waitpid( $pid, 0 );
-	    $chst = $? >> 8;
-	    if ( $chst ) {
-	      $cher .= $_ while ( <$chou> );
-	      $log->cc( pr => 'err', ls => [ $s, $pp, $cher ], nt => 1,
-			fm => "service %s post_process: %s, error: %s", );
-	    }
-	  }
+	foreach my $svc ( @{$cf->get('service', $s, 'plugin')} ) {
+	  Regather::Plugin->new( $svc, {
+					cf           => $cf,
+					force        => $force,
+					log          => $log,
+					obj          => $obj,
+					out_file_old => $out_file_old,
+					prog         => sprintf("%s v.%s", $PROGNAM, $VERSION),
+					rdn          => $rdn,
+					s            => $s,
+					st           => $st,
+					ts_fmt       => $ts_fmt,
+					v            => $v,
+				       } )->ldap_sync_delete;
 	}
+
       }
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
-      $log->cc( pr => 'debug', fm => "Received SYNC DONE CONTROL" ) if $v > 1;
+      $log->cc( pr => 'debug', fm => "%s: Received SYNC DONE CONTROL" ) if $v > 1;
     } elsif ( ! defined $syncstate ) {
-      $log->cc( pr => 'warning', fm => "LDAP entry without Sync State control" ) if $v > 1;
+      $log->cc( pr => 'warning', fm => "%s: LDAP entry without Sync State control" ) if $v > 1;
     }
 
     $req->cookie($syncstate->cookie) if $syncstate->cookie;
 
   } elsif ( defined $obj && $obj->isa('Net::LDAP::Intermediate') ) {
-    $log->cc( pr => 'debug', fm => "Received Net::LDAP::Intermediate\n%s", ls => [ $obj ] )
+    $log->cc( pr => 'debug', fm => "%s: Received Net::LDAP::Intermediate\n%s", ls => [ __PACKAGE__, $obj ] )
       if $v > 3;
     $req->cookie($obj->{'asn'}->{'refreshDelete'}->{'cookie'});
   } elsif ( defined $obj && $obj->isa('Net::LDAP::Reference') ) {
-    $log->cc( pr => 'debug', fm => "Received Net::LDAP::Reference\n%s", ls => [ $obj ] )
+    $log->cc( pr => 'debug', fm => "%s: Received Net::LDAP::Reference\n%s", ls => [ __PACKAGE__, $obj ] )
       if $v > 3;
     return;
   } else {
     return;
   }
-}
-
-sub out_paths {
-  local %_ = @_;
-  my $arg = { cf      => $_{cf},
-	      obj     => $_{obj},
-	      s       => $_{s},
-	      rdn     => $_{rdn},
-	      rdn_val => $_{rdn_val} // $_{obj}->get_value($_{rdn}), };
-  my ($out_file_pfx, $out_file);
-  if ( $arg->{cf}->is_set('service', $arg->{s}, 'out_file_pfx') &&
-       $arg->{cf}->is_set('service', $arg->{s}, 'out_file') ) {
-    $out_file_pfx = $arg->{obj}->get_value($arg->{cf}->get('service', $arg->{s}, 'out_file_pfx'));
-    $out_file_pfx = substr($out_file_pfx, 1) if $arg->{cf}->is_set(qw(core altroot));
-    if ( ! -d $out_file_pfx ) {
-      $log->cc( pr => 'err', fm => "service %s, target directory %s doesn't exist",
-		ls => [ $arg->{s}, $out_file_pfx ] );
-      return ();
-    } else {
-      $out_file = sprintf("%s%s", $arg->{cf}->get('service', $arg->{s}, 'out_file'),
-			  $arg->{cf}->get('service', $arg->{s}, 'out_ext') // '');
-    }
-  } elsif ( ! $arg->{cf}->is_set('service', $arg->{s}, 'out_file_pfx') &&
-	    $arg->{cf}->is_set('service', $arg->{s}, 'out_file')) {
-    $out_file = sprintf("%s%s", $arg->{cf}->get('service', $arg->{s}, 'out_file'),
-			$arg->{cf}->get('service', $arg->{s}, 'out_ext') // '');
-  } elsif ( ! $arg->{cf}->is_set('service', $arg->{s}, 'out_file_pfx') &&
-	    ! $arg->{cf}->is_set('service', $arg->{s}, 'out_file')) {
-    $out_file = sprintf("%s%s", $arg->{rdn_val},
-			$arg->{cf}->get('service', $arg->{s}, 'out_ext') // '');
-  }
-
-  return ( out_file_pfx => $out_file_pfx, out_file => $out_file );
-}
-
-sub opensslize {
-  my $args = shift;
-  my $arg = { cmd     => $args->{cmd}     // 'crl',
-	      in      => $args->{in},
-	      inform  => $args->{inform}  // 'DER',
-	      outform => $args->{outform} // 'PEM'
-	    };
-
-  my ( $chin, $chou );
-  my $pid = open2($chou, $chin,
-		  '/usr/bin/openssl', $arg->{cmd}, '-inform', $arg->{inform}, '-outform', $arg->{outform});
-
-  print $chin $arg->{in};
-  waitpid( $pid, 0 );
-  my $chst = $? >> 8;
-  if ( $chst ) {
-    $log->cc( pr => 'err',
-	      fm => "opensslize() error!" ) if $v > 1;
-  }
-
-  $arg->{res} .= $_ while ( <$chou> );
-
-  return $arg->{res};
 }
 
 __END__
@@ -974,7 +718,7 @@ accessible. (mandatory)
 
 run in foreground (optional)
 
-=item B<-F | --forece>
+=item B<-F | --force>
 
 force re-generation of resources configured regardless existent file mtime and
 LDAP object modifiedTimestamp
@@ -997,6 +741,10 @@ for example I<core.dryrun=1> (for full list of options available see Regather::C
 =item B<--config-help>
 
 print config file lexicon (require option I<-c>, set)
+
+=item B<--plugin-list>
+
+available plugins list
 
 =item B<-v>
 
