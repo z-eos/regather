@@ -219,7 +219,7 @@ sub cc_ldap_err { goto &conclude_ldap_err }
 
 =item B<notify>
 
-method to be used to send log message via email 
+method to be used to send log message via email
 
 =cut
 

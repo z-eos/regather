@@ -246,6 +246,8 @@ sub mangle {
   my $self = shift;
   my ( $section, $item, $k, $v );
 
+  my $re_mod = qr(^Can.t locate.*);
+
   if ( $self->is_set(qw(core uid)) ) {
     $item = getpwnam( $self->get(qw(core uid)) );
     if ( defined $item ) {
@@ -303,6 +305,12 @@ sub mangle {
       foreach my $plg ( $self->get('service', $svc, 'plugin') ) {
 
 	if ( $plg eq 'nsupdate' ) {
+	  eval { require Net::DNS };
+	  if ( $@ =~ /$re_mod/ ) {
+	    print "ERROR: ", __PACKAGE__, ": ", $@, "\n";
+	    exit 2;
+	  }
+
 	  if ( ! $self->is_set('service', $svc, 'ns_attr') ) {
 	    print __PACKAGE__, ": service $svc lacks ns_attr option\n";
 	    exit 2;
@@ -310,6 +318,18 @@ sub mangle {
 	}
 
 	if ($plg eq 'configfile' ) {
+	  eval { require Template };
+	  if ( $@ =~ /$re_mod/ ) {
+	    print "ERROR: ", __PACKAGE__, ": ", $@, "\n";
+	    exit 2;
+	  }
+
+	  eval { require File::Temp };
+	  if ( $@ =~ /$re_mod/ ) {
+	    print "ERROR: ", __PACKAGE__, ": ", $@, "\n";
+	    exit 2;
+	  }
+
 	  if ( ! $self->is_set('service', $svc, 'tt_file') ) {
 	    print __PACKAGE__, ": service $svc lacks tt_file option\n";
 	    exit 2;

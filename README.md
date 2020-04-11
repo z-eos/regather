@@ -17,6 +17,6 @@ As example, regather, on LDAP event can
 * nsupdate DNS zones
 * create/re-write/delete mail domain maildir directory in IMAP4 space, on domain binding to IMAP server LDAP configuration (todo)
 
-In theory it is possible to adopt regather to do anything you want by LDAP syncrepl event.
+In theory it is possible to adopt regather to do anything you want on LDAP syncrepl event.
 
 Copyright (c) 2019 [Zeus Panchenko](https://github.com/z-eos)
