@@ -486,21 +486,22 @@ sub core_only {
   return 0;
 }
 
-=item chk_depend_notify
+=item chk_notify_email
 
-service I<notify> dependency check
+email address validation against regex
 
-service related notifications have sense only when notify_email is defined
+^[a-z0-9]([a-z0-9.]+[a-z0-9])?\@[a-z0-9.-]+$
 
 =cut
 
-sub chk_depend_notify {
+sub chk_notify_email {
   my ($self, $valref, $prev_value, $locus) = @_;
-  if ( ! $self->is_set(qw(core notify_email)) ) {
-    $self->error(sprintf("notify_email is not defined"),
-		 locus => $locus);
+
+  if ( $$valref !~ /^[a-z0-9]([a-z0-9.]+[a-z0-9])?\@[a-z0-9.-]+$/ ) {
+    $self->error('notify_email is not valid email address', locus => $locus);
     return 0;
   }
+
   return 1;
 }
 
@@ -527,10 +528,12 @@ sub error {
   my $self = shift;
   my $err  = shift;
   local %_ = @_;
-  my $locus = $_{locus} ? $_{locus} . ': ' : '';
+
   $self->{logger}->cc( pr => 'err',
 		       fm => "%s: config parser error: %s%s",
-		       ls => [ __PACKAGE__, $locus, $err ] );
+		       ls => [ __PACKAGE__,
+			       exists $_{locus} ? $_{locus} . ': ' : '',
+			       $err ] );
 }
 
 
@@ -621,7 +624,7 @@ altroot      = STRING :re="^/tmp/.*" :check=chk_dir
 dryrun       = NUMBER :default 0
 gid          = STRING
 notify       = NUMBER :default 0
-notify_email = STRING :mandatory :array
+notify_email = STRING :mandatory :array :check=chk_notify_email
 pid_file     = STRING :check=chk_dir_pid :default /var/run/openldap/regather.pid
 tt_debug     = NUMBER :default 0
 tt_path      = STRING :check=chk_dir :default /usr/local/etc/regather.d
