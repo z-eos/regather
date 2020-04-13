@@ -30,6 +30,20 @@ A command object fabric.  Looks for a perl module for B<$class>, loads
 it and returns an instance of that class.  Surplus arguments (B<...>)
 are passed as parameters to the underlying class constructor.
 
+Input data for plugin is a hash:
+
+      cf           reference to Config class object
+      force        force all actions done on start
+      log          reference to Logg class object
+      obj          reference to Net::LDAP object
+      out_file_old ... looks like it is not needed any more ...
+      prog         program name and version
+      rdn          RDN of a LDAP object event relates to
+      s            service
+      st           syncrepl state
+      ts_fmt       timestamp format
+      v            verbosity
+
 Each plugin should provide two methods
 
 ldap_sync_add_modify and ldap_sync_delete

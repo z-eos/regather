@@ -630,7 +630,7 @@ __END__
 
 =head1 NAME
 
-regather - syncrepl consumer to perform action desired on
+regather - LDAP syncrepl consumer script to perform actions desired on
 syncrepl event.
 
 =head1 SYNOPSIS
@@ -639,33 +639,35 @@ regather [-h|--help|-? -F] <-c regather.conf> [ -C section.option=value, ... ]
 
 =head1 DESCRIPTION
 
-I<regather> is a syncrepl consumer to generate ( B<re-gather> ) files
-on LDAP synrepl events or even more, it can perform any action you set (like
-create/delete directories or other).
+I<regather> is a LDAP syncrepl consumer to generate ( B<re-gather> )
+files on LDAP synrepl events or even more, it can perform any action
+you set (like create/delete directories or other).
+
+I<regather> performs all actions through plugins. Plugins currently
+implemented you can know with option I<--plugin-list>
 
 It uses L<Net::LDAP> to do all LDAP related stuff and L<Template> to
 generate files. Config file is processed with L<Config::Parser> (look
 B<CONFIG FILE> section bellow)
 
-As an example, regather will re-write each OpenVPN client config file on
-change, or re-write CRL file on update in LDAP or change sieve script
-for mail user.
+As an example, regather can re-write each OpenVPN client config file
+on change done to client LDAP configured data, or re-write CRL file on
+update in LDAP or change sieve script for mail user.
 
 I<regather> is configured via it's configuration file. Each
-configuration option can be overidden via CLI options like I<-C
+configuration option can be set/overidden via CLI options like I<-C
 section.subsection.subsubsection.option=value>
 
 I<regather> connects to LDAP I<ldap.opt.uri> configured and performs
 search with I<ldap.srch.filter> which B<has to provide search result
 for all> configured I<service>s
 
-Search results are used to provide data for Template(3) to:
+Search results are used to provide data for plugins.
 
-- write target file, using configured I<core.tt_path/service.XXX.tt_file>
+Module Template(3) is used to write target file, using configured
+I<core.tt_path/service.XXX.tt_file>
 
-- manipulate with service/s directory/ies
-
-- to be continued...
+Net::DNS(3) is used to nsupdate dyn zones.
 
 =head1 OPERATIONS
 

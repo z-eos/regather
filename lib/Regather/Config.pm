@@ -490,7 +490,7 @@ sub core_only {
 
 email address validation against regex
 
-^[a-z0-9]([a-z0-9.]+[a-z0-9])?\@[a-z0-9.-]+$
+    ^[a-z0-9]([a-z0-9.]+[a-z0-9])?\@[a-z0-9.-]+$
 
 =cut
 

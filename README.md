@@ -19,4 +19,4 @@ As example, regather, on LDAP event can
 
 In theory it is possible to adopt regather to do anything you want on LDAP syncrepl event.
 
-Copyright (c) 2019 [Zeus Panchenko](https://github.com/z-eos)
+Copyright (c) 2020 [Zeus Panchenko](https://github.com/z-eos)
