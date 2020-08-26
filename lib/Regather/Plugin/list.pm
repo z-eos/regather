@@ -43,9 +43,9 @@ sub run {
   my $self = shift;
   print "\nAvailable plugins are:\n";
   my %names = Regather::Plugin->names;
+  my ($s, @res);
   while ( my ($k, $v) = each %names ) {
 
-    my $s;
     open(my $fh, '>', \$s);
     pod2usage(-input      => $v,
 	      -output     => $fh,
@@ -55,9 +55,11 @@ sub run {
     close $fh;
     my (undef,$descr) = split("\n", $s||'');
     $descr = '    ' . $k unless ($descr);
-    print "$descr, Regather::Plugin::$k(3)\n";
+    push @res, "$descr, Regather::Plugin::$k(3)\n";
 
   }
+
+  print $_ foreach (sort @res);
 }
 
 ######################################################################

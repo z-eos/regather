@@ -1,5 +1,5 @@
-#!/usr/local/bin/perl
-# -*- mode: cperl; mode: follow; -*-
+#!perl
+# -*- mode: cperl; eval: (follow-mode); -*-
 #
 
 use strict;
@@ -38,7 +38,7 @@ use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDA
 
 my @DAEMONARGS = ($0, @ARGV);
 my $PROGNAM    = fileparse($0);
-our $VERSION   = '0.79.91';
+our $VERSION   = '0.80';
 
 our $v      = 0;
 our $fg     = 0;
@@ -347,11 +347,14 @@ sub ldap_search_callback {
   my $syncstate = scalar @controls ? $controls[0] : undef;
 
   my ( $s, $st, $mesg, $entry, @entries, $ldif, $map,
-       $out_file_pfx_old, $out_file_old,
+       $out_file_pfx_old,
        $tmp_debug_msg,
        $rdn, $rdn_old, $rdn_re,
        $pp, $chin, $chou, $chst, $cher, $email, $email_body );
 
+  ######## !! not needed ?
+  my $out_file_old;
+  
   $log->cc( pr => 'debug', fm => "%s: syncstate: %s", ls => [ __PACKAGE__, $syncstate ] )
     if $v > 5;
   $log->cc( pr => 'debug', fm => "%s: object: %s", ls => [ __PACKAGE__, $obj ] ) if $v > 5;
