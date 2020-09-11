@@ -1,7 +1,7 @@
-# -*- mode: cperl; mode: follow; -*-
+# -*- mode: cperl; eval: (follow-mode); -*-
 #
 
-package Regather::Config;
+package App::Regather::Config;
 
 use strict;
 use warnings;
@@ -10,7 +10,7 @@ use parent 'Config::Parser::Ini';
 use Carp;
 use File::Basename;
 
-use Regather::Plugin;
+use App::Regather::Plugin;
 
 use constant LDAP => { opt => { async      => '',
 				debug      => '',
@@ -69,12 +69,12 @@ use constant LDAP => { opt => { async      => '',
 
 =head1 NAME
 
-Regather::Config - config file processing class
+App::Regather::Config - config file processing class
 
 =head1 SYNOPSIS
 
-    use Regather::Config;
-    my $cf = new Regather::Config ( filename  => $config,
+    use App::Regather::Config;
+    my $cf = new App::Regather::Config ( filename  => $config,
     			            logger    => $log,
     				    cli       => $cli,
     				    verbose   => $v );
@@ -99,7 +99,7 @@ This is a class to log messages.
 
 =item new
 
-Creates a new B<Regather::Config> object
+Creates a new B<App::Regather::Config> object
 
 =over 4
 
@@ -113,7 +113,7 @@ Hash with CLI provided config options.
 
 =item logger =E<gt> = delete $_{logger};
 
-Regather::Logg object created preliminary.
+App::Regather::Logg object created preliminary.
 
 =item fg =E<gt> 0 | 1
 
@@ -154,7 +154,7 @@ sub new {
       $self->add_value($k, $v, new Text::Locus("\noption \"$k\" provided from CLI",1)) ||
 	exit 1;
     }
-  } else {
+  } elsif ( defined $cli && ref($cli) ne 'HASH' ) {
     $self->error("malformed option/s provided from CLI");
     exit 1;
   }
@@ -169,6 +169,7 @@ sub new {
       }
     }
   }
+  use Data::Printer; p $self;
 
   $self->commit or return;
 
@@ -377,6 +378,7 @@ output is not sorted, it is in todo
 
 sub config_help {
   my $self = shift;
+
   my $lex = $self->lexicon;
   my ( $default, $re, $check );
   foreach (sort keys %$lex) {
@@ -513,7 +515,7 @@ check plugin name against existent plugins list
 
 sub chk_plugin {
   my ($self, $valref, $prev_value, $locus) = @_;
-  my %names = Regather::Plugin->names;
+  my %names = App::Regather::Plugin->names;
   $self->{plugin_names} //= [ keys(%names) ];
   0 < grep { $$valref eq $_ } @{$self->{plugin_names}} ? return 1 : return 0;
 }
@@ -584,7 +586,7 @@ can have multiple values.
 
 =head1 SEE ALSO
 
-L<Regather::Logg>,
+L<App::Regather::Logg>,
 L<Config::AST>,
 L<Config::Parser>,
 L<Config::Parser::Ini>,

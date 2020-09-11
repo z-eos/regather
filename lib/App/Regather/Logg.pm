@@ -1,7 +1,7 @@
 # -*- mode: cperl; mode: follow; -*-
 #
 
-package Regather::Logg;
+package App::Regather::Logg;
 
 use strict;
 use warnings;
@@ -25,16 +25,16 @@ use constant dpc => { info    => 'ansi113',
 
 =head1 NAME
 
-Regather::Logg - logging class
+App::Regather::Logg - logging class
 
 =head1 SYNOPSIS
 
-    use Regather::Logg;
-    my $log = new Regather::Logg( prognam    => 'MyAppName',
+    use App::Regather::Logg;
+    my $log = new App::Regather::Logg( prognam    => 'MyAppName',
 			          foreground => $foreground_or_syslog,
 			          colors     => $wheather_to_use_term_colors );
-    $log->cc( pr => 'info', fm => "Regather::Logg initialized ... (write to syslog)" );
-    $log->cc( fg => 1, fm => "Regather::Logg initialized ... (write to STDOUT)" );
+    $log->cc( pr => 'info', fm => "App::Regather::Logg initialized ... (write to syslog)" );
+    $log->cc( fg => 1, fm => "App::Regather::Logg initialized ... (write to STDOUT)" );
     ...
     my $mesg = $ldap->search( filter => "(objectClass=unsearchebleThing)");
     $log->logg_ldap_err( mesg => $mesg );
@@ -49,7 +49,7 @@ This is a class to log messages.
 
 =item B<new>
 
-Creates a new B<Regather::Logg> object
+Creates a new B<App::Regather::Logg> object
 
 =over 4
 
@@ -109,8 +109,8 @@ sub new {
 sub colors     { shift->{colors} }
 sub foreground { shift->{foreground} }
 sub host_name  { shift->{hostname} }
-sub prognam    { shift->{prognam} }
 sub ts_fmt     { shift->{ts_fmt} }
+sub prognam    { shift->{prognam} }
 
 =head1 METHODS
 
@@ -242,7 +242,7 @@ sub notify {
 
 setter to set options from config file
 
-on input it expects Regather::Config object section for Regather::Logg
+on input it expects App::Regather::Config object section for App::Regather::Logg
 
 =cut
 
