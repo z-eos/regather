@@ -98,7 +98,8 @@ configured in service.
 
 =item B<-c | --config>
 
-config file, it must be owned by root and must not be group and world
+absolute (or relative to core.altroot directory) path to config file,
+it must be owned by root and must not be group and world
 accessible. (mandatory)
 
 =item B<-f | --foreground>
@@ -146,6 +147,19 @@ help page
 shows version
 
 =back
+
+=head1 EXAMPLES
+
+regather -c /some/regather.conf.config-tiny \
+         -C core.altroot=/tmp/regather-altroot.d \
+         -C core.tt_path=/path/regather.d \
+         --colors -f -Fvvv
+
+this does next:
+    - use separate config file
+    - use alternate-to-config-file-defined directory to place the results to
+    - use alternate-to-config-file-defined directory for templates
+    - use terminal colors in foreground and force re-generation of service files
 
 =head1 FILES
 

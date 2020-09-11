@@ -86,6 +86,19 @@ sub new {
 			    cli      => $self->{_opt}{cli},
 			    verbose  => $self->{_opt}{v} );
 
+  my $cf_mode = (stat($self->{_opt}{config}))[2] & 0777;
+  my $fm_msg;
+  if ( $cf_mode & 002 || $cf_mode & 006 ) {
+    $fm_msg = 'world';
+  } elsif ( $cf_mode & 020 || $cf_mode & 060) {
+    $fm_msg = 'group';
+  }
+  if ( defined $fm_msg ) {
+    $self->{_opt}{l}->cc( pr => 'err', fm => 'config file is accessible by ' . $fm_msg);
+    pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
+    exit 1;
+  }
+
   $self->{_opt}{last_forever} = 1;
 
   # !!! TO CORRECT
@@ -123,19 +136,6 @@ sub o {
 
 sub run {
   my $self = shift;
-
-  my $cf_mode = (stat($self->o('config')))[2] & 0777;
-  my $fm_msg;
-  if ( $cf_mode & 002 || $cf_mode & 006 ) {
-    $fm_msg = 'world';
-  } elsif ( $cf_mode & 020 || $cf_mode & 060) {
-    $fm_msg = 'group';
-  }
-  if ( defined $fm_msg ) {
-    $self->l->cc( pr => 'err', fm => 'config file is accessible by ' . $fm_msg);
-    pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
-    exit 1;
-  }
 
   $self->l->cc( pr => 'info', fm => "App::Regather::Logg initialized ..." ) if $self->o('v') > 1;
 
