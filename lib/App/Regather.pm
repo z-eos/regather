@@ -8,15 +8,11 @@ use warnings;
 use diagnostics;
 
 use Carp;
-use POSIX;
-use Template;
-use Pod::Usage   qw(pod2usage);
-use Sys::Syslog  qw(:standard :macros);
-use Getopt::Long qw(:config no_ignore_case gnu_getopt auto_version);
-use List::Util   qw(uniqstr);
-use IPC::Open2;
-use File::Temp;
 use File::Basename;
+use File::Temp;
+use Getopt::Long qw(:config no_ignore_case gnu_getopt auto_version);
+use IPC::Open2;
+use List::Util   qw(uniqstr);
 
 use Net::LDAP;
 use Net::LDAP::LDIF;
@@ -32,6 +28,11 @@ use Net::LDAP::Constant qw( LDAP_SYNC_REFRESH_ONLY
 			    LDAP_LOCAL_ERROR );
 use Net::LDAP::Control::SyncRequest;
 use Net::LDAP::Util qw(generalizedTime_to_time);
+
+use POSIX;
+use Pod::Usage   qw(pod2usage);
+use Sys::Syslog  qw(:standard :macros);
+use Template;
 
 use App::Regather::Config;
 use App::Regather::Logg;

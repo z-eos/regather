@@ -4,9 +4,9 @@ use warnings;
 use ExtUtils::MakeMaker;
 use Module::Metadata;
 
-WriteMakefile(NAME             => 'regather',
+WriteMakefile(NAME             => 'App::Regather',
               ABSTRACT_FROM    => 'regather',
-              VERSION_FROM     => 'regather',
+              VERSION_FROM     => 'lib/App/Regather.pm',
 	      EXE_FILES        => [ 'regather' ],
               AUTHOR           => 'Zeus Panchenko <zeus@gnu.org.ua>',
               LICENSE          => 'gpl_3',
@@ -18,7 +18,7 @@ WriteMakefile(NAME             => 'regather',
 				   'Config::AST'          => '1.05',
 				   'Config::Parser'       => '1.04',
 				   'Config::Parser::ldap' => '1.00',
-				   'Mail::Tools'          => '2.19',
+				   'Mail::Tools'          => '2.21',
 				   'Net::LDAP'            => '0.65',
 				   'Net::DNS'             => '1.15',
 				   'Template'             => '2.29',
