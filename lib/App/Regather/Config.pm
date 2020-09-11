@@ -169,7 +169,6 @@ sub new {
       }
     }
   }
-  use Data::Printer; p $self;
 
   $self->commit or return;
 

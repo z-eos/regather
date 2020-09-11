@@ -102,6 +102,7 @@ sub new {
   $args{hostname} = 'HOSTNAME_NOT_AVAILABLE' if $@;
 
   openlog($args{prognam}, "ndelay,pid") if ! $args{foreground};
+  use Data::Printer; p %args;
 
   bless { %args }, $self;
 }
@@ -109,8 +110,8 @@ sub new {
 sub colors     { shift->{colors} }
 sub foreground { shift->{foreground} }
 sub host_name  { shift->{hostname} }
-sub ts_fmt     { shift->{ts_fmt} }
 sub prognam    { shift->{prognam} }
+sub ts_fmt     { shift->{ts_fmt} }
 
 =head1 METHODS
 
