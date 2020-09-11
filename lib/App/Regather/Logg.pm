@@ -102,7 +102,6 @@ sub new {
   $args{hostname} = 'HOSTNAME_NOT_AVAILABLE' if $@;
 
   openlog($args{prognam}, "ndelay,pid") if ! $args{foreground};
-  use Data::Printer; p %args;
 
   bless { %args }, $self;
 }

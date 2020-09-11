@@ -1,11 +1,11 @@
 # -*- mode: cperl; mode: follow; -*-
 #
 
-package Regather::Plugin;
+package App::Regather::Plugin;
 
 =head1 NAME
 
-Regather::Plugin - plugin (module) loader
+App::Regather::Plugin - plugin (module) loader
 
 =head1 DESCRIPTION
 

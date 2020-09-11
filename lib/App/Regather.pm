@@ -75,20 +75,22 @@ sub new {
 	     'h'            => sub { pod2usage(-exitval => 0, -verbose => 2); exit 0 },
 	    );
 
-  $self->{_opt}{l} = new App::Regather::Logg( prognam    => $self->{_progname},
-					      foreground => $self->{_opt}{fg},
-					      colors     => $self->{_opt}{colors} );
+  $self->{_opt}{l} = new
+    App::Regather::Logg( prognam    => $self->{_progname},
+			 foreground => $self->{_opt}{fg},
+			 colors     => $self->{_opt}{colors} );
 
-  $self->{_opt}{cf} = new App::Regather::Config ( filename => $self->{_opt}{config},
-						  logger   => $self->{_opt}{l},
-						  cli      => $self->{_opt}{cli},
-						  verbose  => $self->{_opt}{v} );
+  $self->{_opt}{cf} = new
+    App::Regather::Config ( filename => $self->{_opt}{config},
+			    logger   => $self->{_opt}{l},
+			    cli      => $self->{_opt}{cli},
+			    verbose  => $self->{_opt}{v} );
 
   $self->{_opt}{last_forever} = 1;
 
   # !!! TO CORRECT
   if ( ! defined $self->{_opt}{cf} ) {
-    $self->l->cc( pr => 'err', fm => "%s: do fix config file ..." );
+    $self->l->cc( pr => 'err', fm => "do fix config file ..." );
     pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
     exit 1;
   }
@@ -102,6 +104,8 @@ sub new {
     App::Regather::Plugin->new( 'list' )->run;
     exit 0;
   }
+
+  return $self;
 }
 
 sub progname { shift->{_progname} }
@@ -120,15 +124,6 @@ sub o {
 sub run {
   my $self = shift;
 
-  # if ( $self->o('plugin_list') ) {
-  #   App::Regather::Plugin->new( 'list' )->run;
-  #   exit 0;
-  # }
-
-  # my $self->log = new App::Regather::Logg( prognam    => $self->progname,
-  # 				foreground => $self->o('fg'),
-  # 				colors     => $self->o('colors') );
-
   my $cf_mode = (stat($self->o('config')))[2] & 0777;
   my $fm_msg;
   if ( $cf_mode & 002 || $cf_mode & 006 ) {
@@ -145,23 +140,7 @@ sub run {
   $self->l->cc( pr => 'info', fm => "App::Regather::Logg initialized ..." ) if $self->o('v') > 1;
 
   $self->l->cc( pr => 'info', fm => "%s: options provided from CLI:\n%s", ls => [ __PACKAGE__, $self->o('cli') ] )
-    if keys( %{$self->o('cli')} ) && $self->o('v') > 1;
-
-  # my $cf = new App::Regather::Config ( filename  => $self->o('config'),
-  # 				  logger    => $self->log,
-  # 				  cli       => $self->o('cli'),
-  # 				  verbose   => $self->o('v') );
-
-  # if ( ! defined $cf ) {
-  #   $self->l->cc( pr => 'err', fm => "%s: do fix config file ..." );
-  #   pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
-  #   exit 1;
-  # }
-
-  # if ( $self->o('ch') ) {
-  #   $self->cf->config_help;
-  #   exit 1;
-  # }
+    if defined $self->o('cli') && keys( %{$self->o('cli')} ) && $self->o('v') > 1;
 
   $self->l->set_m( $self->cf->getnode('log')->as_hash );
   $self->l->set( notify       => [ $self->cf->get('core', 'notify') ] );
@@ -176,11 +155,11 @@ sub run {
 
   @{$self->{_opt}{svc}} = grep { $self->cf->get('service', $_, 'skip') != 1 } $self->cf->names_of('service');
 
-  daemonize() if ! $self->o('fg');
+  $self->daemonize if ! $self->o('fg');
 
   our $s;
   my  $tmp;
-  our $cfgattrs = [];
+  my  $cfgattrs = [];
   my  $mesg;
   my  @svc_map;
 
@@ -239,7 +218,7 @@ sub run {
       delete $start_tls_options->{ssl};
       eval {
 	$mesg =
-	  $self->ldap->start_tls( @{[ map { $_ => $start_tls_options->{$_} } %$start_tls_options ]} );
+	  $self->o('ldap')->start_tls( @{[ map { $_ => $start_tls_options->{$_} } %$start_tls_options ]} );
       };
       if ( $@ ) {
 	$self->l->cc( pr => 'err', fm => "%s: TLS negotiation failed: %s", ls => [ __PACKAGE__, $! ] );
@@ -261,7 +240,7 @@ sub run {
 	while ( my($k, $v) = each %{$bind} ) {
 	  push @bind_options, $k => $v;
 	}
-	$mesg = $self->ldap->bind( @bind_options );
+	$mesg = $self->o('ldap')->bind( @bind_options );
 	if ( $mesg->code ) {
 	  ####### !!!!!!! TODO: to implement exponential delay on error sending to awoid log file/notify
 	  ####### !!!!!!! queue overflow
@@ -279,14 +258,14 @@ sub run {
 						 critical => 1,
 						 cookie   => undef, );
 
-    $mesg = $self->ldap->search( base     => $self->cf->get(qw(ldap srch base)),
-			   scope    => $self->cf->get(qw(ldap srch scope)),
-			   control  => [ $self->o('req') ],
-			   callback => \&ldap_search_callback,
-			   filter   => $self->cf->get(qw(ldap srch filter)),
-			   attrs    => $cfgattrs,
-			   sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
-			   timelimit=> $self->cf->get(qw(ldap srch timelimit)),
+    $mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch base)),
+				      scope    => $self->cf->get(qw(ldap srch scope)),
+				      control  => [ $self->o('req') ],
+				      callback => sub {$self->ldap_search_callback(@_)},
+				      filter   => $self->cf->get(qw(ldap srch filter)),
+				      attrs    => $cfgattrs,
+				      sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
+				      timelimit=> $self->cf->get(qw(ldap srch timelimit)),
 			 );
     if ( $mesg->code ) {
       $self->l->cc( pr => 'err',
@@ -309,7 +288,7 @@ sub run {
     }
   }
 
-  $mesg = $self->ldap->unbind;
+  $mesg = $self->o('ldap')->unbind;
   if ( $mesg->code ) {
     $self->l->cc_ldap_err( mesg => $mesg );
     exit $mesg->code;
@@ -369,11 +348,11 @@ sub daemonize {
   close( $pp ) || do {
     print "close $self->cf->get(qw(core pid_file)) (opened for writing), failed: $!\n\n"; exit 1; };
 
-  # if ( $self->o('v') > 1 ) {
-  #   open (STDIN,  "</dev/null") || do { print "Can't redirect /dev/null to STDIN\n\n"; exit 1; };
-  #   open (STDOUT, ">/dev/null") || do { print "Can't redirect STDOUT to /dev/null\n\n"; exit 1; };
-  #   open (STDERR, ">&STDOUT")   || do { print "Can't redirect STDERR to STDOUT\n\n"; exit 1; };
-  # }
+  if ( $self->o('v') > 1 ) {
+    open (STDIN,  "</dev/null") || do { print "Can't redirect /dev/null to STDIN\n\n";  exit 1; };
+    open (STDOUT, ">/dev/null") || do { print "Can't redirect STDOUT to /dev/null\n\n"; exit 1; };
+    open (STDERR, ">&STDOUT")   || do { print "Can't redirect STDERR to STDOUT\n\n";    exit 1; };
+  }
 
   $SIG{HUP}  = sub { my $sig = @_;
 		     $self->l->cc( pr => 'warning', fm => "%s: SIG $sig received, restarting" );
@@ -396,6 +375,7 @@ sub daemonize {
 
 sub ldap_search_callback {
   my ( $self, $msg, $obj ) = @_;
+
 
   my @controls = $msg->control;
   my $syncstate = scalar @controls ? $controls[0] : undef;
@@ -430,7 +410,7 @@ sub ldap_search_callback {
       ### deletion and in both cases Net::LDAP::Entry provided contains only DN,
       ### so, we need to "re-construct" it for further processing
       if ( $st == LDAP_SYNC_DELETE ) {
-	$mesg = $self->ldap->search( base     => $self->cf->get(qw(ldap srch log_base)),
+	$mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
 			       scope    => 'sub',
 			       sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
 			       timelimit=> $self->cf->get(qw(ldap srch timelimit)),
@@ -480,7 +460,7 @@ sub ldap_search_callback {
 	    %reqmod = map  { substr($_, 0, -2) => 1 } grep { /^(.*):-$/g }
 	      @{$entry->get_value('reqMod', asref => 1)};
 
-	    $mesg = $self->ldap->search( base   => $obj->dn,
+	    $mesg = $self->o('ldap')->search( base   => $obj->dn,
 				   scope  => 'base',
 				   filter => '(objectClass=*)', );
 	    if ( $mesg->code ) {
@@ -502,7 +482,7 @@ sub ldap_search_callback {
 	  }
 	}
       } elsif ( $st == LDAP_SYNC_MODIFY ) {
-	$mesg = $self->ldap->search( base     => $self->cf->get(qw(ldap srch log_base)),
+	$mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
 			       scope    => 'sub',
 			       sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
 			       timelimit=> $self->cf->get(qw(ldap srch timelimit)),
@@ -527,7 +507,7 @@ sub ldap_search_callback {
 	    ### modified object has no accesslog records when it was ModRDN-ed so, we search
 	    ### for accesslog object with reqNewRDN=<$obj->dn RDN> to know old object RDN to use
 	    ### it further for $out_file
-	    $mesg = $self->ldap->search( base     => $self->cf->get(qw(ldap srch log_base)),
+	    $mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
 				   scope    => 'sub',
 				   sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
 				   timelimit=> $self->cf->get(qw(ldap srch timelimit)),
@@ -552,7 +532,7 @@ sub ldap_search_callback {
 		  $rdn_old = (split(/: /, $_))[1] if /$rdn_re/;
 		}
 		### now we reconstruct original object
-		$mesg = $self->ldap->search( base     => $self->cf->get(qw(ldap srch log_base)),
+		$mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
 				       scope    => 'sub',
 				       sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
 				       timelimit=> $self->cf->get(qw(ldap srch timelimit)),

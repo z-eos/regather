@@ -73,22 +73,6 @@ App::Regather::Config - config file processing class
 
 =head1 SYNOPSIS
 
-    use App::Regather::Config;
-    my $cf = new App::Regather::Config ( filename  => $config,
-    			            logger    => $log,
-    				    cli       => $cli,
-    				    verbose   => $v );
-
-    if ( ! defined $cf ) {
-      $log->cc( pr => 'err', fm => "%s: do fix config file ..." );
-      pod2usage(-exitval => 2, -sections => [ qw(USAGE) ]);
-      exit 1;
-    }
-
-    if ( $config_file_options_help_requested ) {
-      $cf->config_help;
-      exit 1;
-    }
 =head1 DESCRIPTION
 
 This is a class to log messages.
@@ -217,6 +201,7 @@ sub get_ldap_config_file {
 
       foreach my $section ( keys %{ LDAP()} ) { # $section: bnd, opt or ssl
 	foreach my $item ( keys %{ LDAP->{$section} } ) { # $_: item in each of ones above
+
 	  $self->add_value( 'ldap.' . $section . '.' . $item,
 
 			    $section eq 'ssl' && $item eq 'verify' && $cf->is_set('tls_reqcert')

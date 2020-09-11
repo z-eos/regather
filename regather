@@ -147,10 +147,6 @@ shows version
 
 =back
 
-=head1 USAGE
-
-regather <-c regather.conf> [ all other options ]
-
 =head1 FILES
 
     /usr/local/etc/regather.d/*.tt templates to generate files from
