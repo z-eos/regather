@@ -1,12 +1,12 @@
-# -*- mode: conf; mode: follow; -*-
+# -*- mode: conf; eval: (follow-mode); -*-
 #
 
 [core]
 #   altroot      = /tmp/regather-altroot.d
 #   dryrun       = 1
   notify       = 0
-  notify_email = zeus@localhost
-  notify_email = root@localhost
+  notify_email = john.doe@localhost.foo.bar
+  notify_email = root@localhost.foo.bar
   pid_file     = /var/run/openldap/regather.pid
   tt_debug     = 1
   tt_path      = /usr/local/etc/regather.d
@@ -32,28 +32,25 @@
  (mu-sieveOnReceive=*)\
  (authorizedService=mail*)\
 )\
-(&\
- (objectClass=radiusObjectProfile)\
- (authorizedService=rad@*)\
-)\
 )
   scope        = sub
   log_base     = cn=umilog
 
 [service ovpn]
-#   uid              = openvpn
-#   gid              = openvpn
-  chmod            = 0640
+#   uid         = openvpn
+#   gid         = openvpn
+  chmod       = 0640
+  ######## !!! to add check depends to config module !!!
   ns_attr     = cn
   ns_keyfile  = /usr/local/etc/regather.d/Kdhcpd.+157+43671.private
   ns_ttl      = 300
   ns_txt_pfx  = REGATHER:
-#  ns_zone     = dev.vpn.nxc.od.ua
-  out_path         = /tmp/2.kill/regather/out_ovpn
-  tt_file          = ovpn.tt
-#   out_ext         = .ovpn
-  ctrl_attr        = umiOvpnCfgConfig
-  ctrl_srv_re      = ^.*,authorizedService=ovpn@.*,ou=People,.*$
+#  ns_zone     = dev.vpn.foo.bar.ua
+  out_path    = /tmp/2.kill/regather/out_ovpn
+  tt_file     = ovpn.tt
+#   out_ext    = .ovpn
+  ctrl_attr   = umiOvpnCfgConfig
+  ctrl_srv_re = ^.*,authorizedService=ovpn@.*,ou=People,.*$
   plugin      = configfile
   plugin      = nsupdate
 
@@ -83,9 +80,9 @@
   tt_file          = sieve.tt
   out_file         = .sieve
   out_file_pfx     = homeDirectory
+  plugin           = configfile
   ctrl_attr        = mu-sieveOnReceive
   ctrl_srv_re      = ^.*,authorizedService=mail@.*,ou=People,.*$
-  plugin           = configfile
 
 [service sieve map s]
   createdon         = createTimestamp
@@ -103,26 +100,11 @@
   tt_file          = crl-ovpn.tt
   out_ext          = -crl.pem
 #  skip             = 1
+  plugin           = configfile
   ctrl_attr        = certificateRevocationList;binary
   ctrl_srv_re      = ^.*,ou=OpenVPN,.*$
-  plugin           = configfile
 
 [service crl-ovpn map s]
   certificateRevocationList = certificateRevocationList;binary
-
-[service crl-rad]
-  chmod            = 0644
-  out_path         = /tmp/2.kill/regather/out_crl
-  tt_file          = crl-rad.tt
-  out_ext          = -rad-crl.pem
-  ctrl_attr        = certificateRevocationList;binary
-  ctrl_attr        = cACertificate;binary
-  ctrl_srv_re      = ^.*,ou=servers,ou=RADIUS,.*$
-  post_process     = service samba_server onerestart
-  plugin           = configfile
-
-[service crl-rad map s]
-  certificateRevocationList = certificateRevocationList;binary
-  cACertificate		    = cACertificate;binary
 
 # END

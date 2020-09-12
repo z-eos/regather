@@ -185,8 +185,9 @@ INT, QUIT, ABRT, TERM - terminate
 =head1 SEE ALSO
 
 L<Net::LDAP>,
+L<Net::LDAP::Control::SyncRequest>
 L<Template>,
-L<Regather::Config>
+L<App::Regather::Config>
 
 =head1 AUTHOR
 

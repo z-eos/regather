@@ -5,7 +5,7 @@ use ExtUtils::MakeMaker;
 use Module::Metadata;
 
 WriteMakefile(NAME             => 'App::Regather',
-              ABSTRACT_FROM    => 'regather',
+              ABSTRACT         => 'regather - LDAP syncrepl consumer script to perform actions desired on syncrepl event',
               VERSION_FROM     => 'lib/App/Regather.pm',
 	      EXE_FILES        => [ 'regather' ],
               AUTHOR           => 'Zeus Panchenko <zeus@gnu.org.ua>',
@@ -18,7 +18,7 @@ WriteMakefile(NAME             => 'App::Regather',
 				   'Config::AST'          => '1.05',
 				   'Config::Parser'       => '1.04',
 				   'Config::Parser::ldap' => '1.00',
-				   'Mail::Tools'          => '2.21',
+				   'Mail::Send'           => '0.80',
 				   'Net::LDAP'            => '0.65',
 				   'Net::DNS'             => '1.15',
 				   'Template'             => '2.29',
