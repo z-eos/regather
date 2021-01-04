@@ -40,7 +40,7 @@ use App::Regather::Plugin;
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 # my @DAEMONARGS = ($0, @ARGV);
-our $VERSION   = '0.80.02';
+our $VERSION   = '0.80.03';
 
 sub new {
   my $class = shift;
@@ -366,7 +366,6 @@ sub daemonize {
     sub { my $sig = @_;
 	  $self->l->cc( pr => 'warning', fm => "%s:  SIG %s received, exiting", ls => [ __PACKAGE__, $sig ] );
 	  $self->{_opt}{last_forever} = 0;
-	  # $self->o('last_forever') = 0;
 	};
   $SIG{PIPE} = 'ignore';
   $SIG{USR1} =
