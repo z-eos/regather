@@ -80,19 +80,22 @@ usable.
 sub names {
   my $self = shift;
   my @classpath = split(/::/, $self);
-  return
+  my %return =
     map { $_->[0] => $_->[1] }
-    map { my $name     = basename($_);
-	  my $filename = File::Spec->catfile(@classpath, $name);
-	  if (exists($INC{$filename})) {
-	    ()
-	  } else {
-	    eval { require $filename; };
-	    $name =~ s/\.pm$//;
-	    $@ ? () : [$name, $_];
-	  }
-	}
+    map {
+      my $name     = basename($_);
+      my $filename = File::Spec->catfile(@classpath, $name);
+      if (exists($INC{$filename})) {
+	()
+      } else {
+	eval { require $filename; };
+	$name =~ s/\.pm$//;
+	$@ ? () : [$name, $_];
+      }
+    }
     sort map { glob File::Spec->catfile($_, @classpath,	'*.pm') } @INC;
+
+  return %return;
 }
 
 ######################################################################
