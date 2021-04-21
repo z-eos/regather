@@ -1,0 +1,40 @@
+# -*- mode: conf; eval: (follow-mode); -*-
+#
+
+[core]
+#   altroot      = /tmp/regather-altroot.d
+#   dryrun       = 1
+  notify       = 0
+  notify_email = zeus@localhost
+  notify_email = root@localhost
+  pid_file     = /var/run/openldap/regather.pid
+  tt_debug     = 1
+  tt_path      = /usr/local/etc/regather.d
+
+[log]
+  facility     = local4
+  colors       = 0
+  foreground   = 0
+  verbosity    = 0
+
+[ldap opt]
+#   debug        = 1
+#   version      = 3
+
+[ldap srch]
+  base         = ou=People,dc=umidb
+  filter       = (objectClass=*)
+  scope        = one
+  log_base     = cn=umilog
+
+[service script_test]
+  plugin       = script
+  ctrl_attr    = uid
+  ctrl_srv_re  = ^.*$
+  post_process = /path/to/regather/contrib/script-example.sh
+  post_process = /path/to/regather/contrib/script-example.pl
+
+[service script_test map s]
+  uid = uid
+
+# END

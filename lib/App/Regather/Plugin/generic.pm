@@ -1,17 +1,17 @@
-# -*- mode: cperl; mode: follow; -*-
+# -*- mode: cperl; eval: (follow-mode); -*-
 #
 
 package App::Regather::Plugin::generic;
 
 =head1 NAME
 
-generic - generic plugin stub
+generic - generic plugin example
 
 =cut
 
 =head1 DESCRIPTION
 
-generic plugin stub
+generic plugin example
 
 writes LDAP entry dump to the file set in config option
 service.servicename.out_file
@@ -24,7 +24,7 @@ configuration:
   plugin      = generic
   ctrl_attr   = uid
   ctrl_srv_re = ^.*$
-  out_path    = /tmp/2.kill/regather/out_ovpn
+  out_path    = /path/to/regather-output
 
 [service generic map s]
   uid = uid
@@ -95,6 +95,9 @@ sub example_out_file {shift->{example_out_file}}
 
 =head2 ldap_sync_add_modify
 
+writes LDAP entry dump to the file set in config option
+service.servicename.out_file
+
 =cut
 
 sub ldap_sync_add_modify {
@@ -126,12 +129,6 @@ alias to ldap_sync_add_modify
 =cut
 
 sub ldap_sync_delete { goto &ldap_sync_add_modify }
-
-=head1 EXAMPLE
-
-regather -c /path/toregather.conf.plugin-generic --colors -f -Fv
-
-=cut
 
 ######################################################################
 
