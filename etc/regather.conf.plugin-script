@@ -29,12 +29,10 @@
 
 [service script_test]
   plugin       = script
+  all_attr     = 1
   ctrl_attr    = uid
   ctrl_srv_re  = ^.*$
   post_process = /path/to/regather/contrib/script-example.sh
   post_process = /path/to/regather/contrib/script-example.pl
-
-[service script_test map s]
-  uid = uid
 
 # END

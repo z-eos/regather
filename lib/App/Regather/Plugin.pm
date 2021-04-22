@@ -51,20 +51,20 @@ ldap_sync_add_modify and ldap_sync_delete
 =cut
 
 sub new {
-    my ($class, $command, @args) = @_;
-    croak __PACKAGE__ . ': command not supplied' unless $command;
-    my $modname = __PACKAGE__ . '::' . $command;
-    my $modpath = $modname;
-    $modpath =~ s{::}{/}g;
-    $modpath .= '.pm';
-    my $cmd = eval { require $modpath; $modname->new(@args) };
-    if ($@) {
-	if ($@ =~ /Can't locate $modpath/) {
-	    die __PACKAGE__ . ": unknown command: $command\n"
-	}
-	croak __PACKAGE__ . ': ERROR: ' . $@;
+  my ($class, $command, @args) = @_;
+  croak __PACKAGE__ . ': command not supplied' unless $command;
+  my $modname = __PACKAGE__ . '::' . $command;
+  my $modpath = $modname;
+  $modpath =~ s{::}{/}g;
+  $modpath .= '.pm';
+  my $cmd = eval { require $modpath; $modname->new(@args) };
+  if ( $@ ) {
+    if ($@ =~ /Can't locate $modpath/) {
+      die __PACKAGE__ . ": unknown command: $command\n"
     }
-    return $cmd;
+    croak __PACKAGE__ . ': ERROR: ' . $@;
+  }
+  return $cmd;
 }
 
 =head2 names

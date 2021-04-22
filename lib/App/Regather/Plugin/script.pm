@@ -11,8 +11,20 @@ script - plugin to run a script against LDAP object on LDAP_SYNC event
 
 =head1 DESCRIPTION
 
-script - plugin to run script against LDAP object attributes set as
+script - plugin to run script against LDAP object attributes, set as
 environment variables on LDAP_SYNC event
+
+environment variables provided to the script:
+
+=over
+
+    REGATHER_LDAP_OBJ_ATTR_<attributeX_name>
+    REGATHER_LDAP_OBJ_DN
+    REGATHER_LDAP_OBJ_LDIF
+    REGATHER_LDAP_SYNC_CONTROL_CODE
+    REGATHER_LDAP_SYNC_CONTROL_NAME
+
+=back
 
 configuration:
 
@@ -20,15 +32,15 @@ configuration:
 
 [service name_of_my_script_service]
   plugin       = script
+  all_attr     = 1
   ctrl_attr    = uid
   ctrl_srv_re  = ^.*$
   post_process = /path/to/scrip1
   post_process = /path/to/scrip2
 
-[service name_of_my_script_service map s]
-  uid = uid
-
 =back
+
+all attributes will be exposed if option B<all_attr> not null
 
 =cut
 

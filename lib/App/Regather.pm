@@ -177,6 +177,14 @@ sub run {
 	@svc_map = ();
       }
     }
+
+    push @{$cfgattrs}, '*'
+      if $self->cf->get('service', $i, 'all_attr') != 0;
+
+    $self->l->cc( pr => 'warning', ls => [ __PACKAGE__, $i, ],
+		  fm => "%s: no LDAP attribute to process is mapped for service `%s`" )
+      if $self->cf->get('service', $i, 'all_attr') == 0 && scalar @svc_map == 0;
+
   }
 
   @{$tmp} = sort @{[ @{$cfgattrs}, qw( associatedDomain
