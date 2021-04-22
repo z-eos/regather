@@ -1,4 +1,4 @@
-# ![UMI](https://github.com/z-eos/regather/raw/master/regather-logo.png) *REGATHER*
+# ![UMI](https://github.com/z-eos/regather/raw/master/regather-logo.png) **REGATHER**
 
 **regather** is a syncrepl consumer to generate ( *re gather* ) files on LDAP synrepl events.
 
