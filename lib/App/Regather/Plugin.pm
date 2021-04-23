@@ -17,6 +17,7 @@ loader.
 use strict;
 use warnings;
 use diagnostics;
+use feature 'state';
 
 use Carp;
 use File::Basename;
@@ -80,7 +81,7 @@ usable.
 sub names {
   my $self = shift;
   my @classpath = split(/::/, $self);
-  my %return =
+  state $return //= {
     map { $_->[0] => $_->[1] }
     map {
       my $name     = basename($_);
@@ -93,9 +94,10 @@ sub names {
 	$@ ? () : [$name, $_];
       }
     }
-    sort map { glob File::Spec->catfile($_, @classpath,	'*.pm') } @INC;
+    sort map { glob File::Spec->catfile($_, @classpath,	'*.pm') } @INC
+  };
 
-  return %return;
+  return %$return;
 }
 
 ######################################################################
