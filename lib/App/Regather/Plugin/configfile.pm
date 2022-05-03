@@ -116,7 +116,7 @@ sub ldap_sync_add_modify {
 			ls => [ __PACKAGE__, $out_to, $self->cf->get('service', $self->service, 'map', $i, $j) ] )
 		if $self->{v} > 0;
 	    } else {
-	      $self->log->cc( pr => 'err', fm => "%s: %s not removed (no attribute: %s); error: ",
+	      $self->log->cc( pr => 'err', fm => "%s: %s not removed (no attribute: %s); error: %s",
 			ls => [ __PACKAGE__, $out_to, $self->cf->get('service', $self->service, 'map', $i, $j), $! ],
 			nt => 1, );
 	    }
