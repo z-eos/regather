@@ -44,6 +44,7 @@ sub new {
 	 log          => delete $args->{log},
 	 obj          => delete $args->{obj},
 	 out_file_old => delete $args->{out_file_old},
+	 prog         => delete $args->{prog},
 	 rdn          => delete $args->{rdn},
 	 service      => delete $args->{s},
 	 st           => delete $args->{st},
