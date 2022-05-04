@@ -55,15 +55,15 @@ sub new {
   my $class = shift;
   local %_ = %{$_[0]};
 
-  $_{log}->cc( pr => 'debug', fm => "%s: service %s; called for dn: %s",
-	       ls => [ __PACKAGE__, $_{s}, $_{obj}->dn, ] ) if $_{v} > 2;
+  $_{log}->cc( pr => 'debug', fm => "%s:%s: service %s; called for dn: %s",
+	       ls => [ __FILE__,__LINE__, $_{s}, $_{obj}->dn, ] ) if $_{v} > 2;
 
   my $example_dn = $_{obj}->dn;
   my $example_out_file = $_{cf}->is_set('service', $_{s}, 'out_file') ?
     $_{cf}->get('service', $_{s}, 'out_file') :
     "regather-plugin-generic-example-output.txt";
-  $_{log}->cc( pr => 'debug', fm => "%s: service %s; out_file: %s",
-	       ls => [ __PACKAGE__, $_{s}, $example_out_file, ] ) if $_{v} > 2;
+  $_{log}->cc( pr => 'debug', fm => "%s:%s: service %s; out_file: %s",
+	       ls => [ __FILE__,__LINE__, $_{s}, $example_out_file, ] ) if $_{v} > 2;
 
   bless {
 	 cf       => delete $_{cf},
@@ -105,8 +105,8 @@ sub ldap_sync_add_modify {
 
   my $ts = POSIX::strftime( "%Y-%m-%d %H:%M:%S", localtime());
   
-  $self->log->cc( pr => 'debug', fm => "%s: dn: %s; example: LDAP sync event: %s processing start",
-		  ls => [ __PACKAGE__, $self->example_dn, SYNST->[$self->syncstate] ]) if $self->v > 0;
+  $self->log->cc( pr => 'debug', fm => "%s:%s: dn: %s; example: LDAP sync event: %s processing start",
+		  ls => [ __FILE__,__LINE__, $self->example_dn, SYNST->[$self->syncstate] ]) if $self->v > 0;
 
   open(my $fh, ">>", '/tmp/' . $self->example_out_file) || do {
     print "Can't open > /tmp/" . $self->example_out_file . " for writing: $!"; exit 1; };
@@ -117,8 +117,8 @@ sub ldap_sync_add_modify {
   close($fh) || do {
     print "close $self->example_out_file (opened for writing), failed: $!\n\n"; exit 1; };
 
-  $self->log->cc( pr => 'debug', fm => "%s: dn: %s; example: LDAP sync event: %s processing stop",
-		  ls => [ __PACKAGE__, $self->example_dn, SYNST->[$self->syncstate] ]) if $self->v > 0;
+  $self->log->cc( pr => 'debug', fm => "%s:%s: dn: %s; example: LDAP sync event: %s processing stop",
+		  ls => [ __FILE__,__LINE__, $self->example_dn, SYNST->[$self->syncstate] ]) if $self->v > 0;
 
 }
 

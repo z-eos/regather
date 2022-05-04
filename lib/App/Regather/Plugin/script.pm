@@ -66,8 +66,8 @@ sub new {
   my $class = shift;
   local %_ = %{$_[0]};
 
-  $_{log}->cc( pr => 'debug', fm => "%s: service %s; called for dn: %s",
-	       ls => [ __PACKAGE__, $_{s}, $_{obj}->dn, ] ) if $_{v} > 2;
+  $_{log}->cc( pr => 'debug', fm => "%s:%s: service %s; called for dn: %s",
+	       ls => [ __FILE__,__LINE__, $_{s}, $_{obj}->dn, ] ) if $_{v} > 2;
 
   bless {
 	 cf       => delete $_{cf},
@@ -112,16 +112,16 @@ sub ldap_sync_add_modify {
   my ($pp, $chin, $chou, $chst, $cher);
   if ( $self->cf->is_set('service', $self->service, 'post_process') ) {
     foreach $pp ( @{$self->cf->get('service', $self->service, 'post_process')} ) {
-      $self->log->cc( pr => 'debug', fm => "%s: dn: %s; LDAP sync event %s processing script: %s",
-		      ls => [ __PACKAGE__, $self->obj->dn, SYNST->[$self->syncstate], $pp ]) if $self->v > 2;
+      $self->log->cc( pr => 'debug', fm => "%s:%s: dn: %s; LDAP sync event %s processing script: %s",
+		      ls => [ __FILE__,__LINE__, $self->obj->dn, SYNST->[$self->syncstate], $pp ]) if $self->v > 2;
 
       my $pid = open2( $chou, $chin, $pp );
       waitpid( $pid, 0 );
       $chst = $? >> 8;
       if ( $chst ) {
 	$cher .= $_ while ( <$chou> );
-	$self->log->cc( pr => 'err', ls => [ __PACKAGE__, $self->service, $pp, $cher ],
-			nt => 1, fm => "%s: service %s post_process: %s, error: %s", );
+	$self->log->cc( pr => 'err', ls => [ __FILE__,__LINE__, $self->service, $pp, $cher ],
+			nt => 1, fm => "%s:%s: service %s post_process: %s, error: %s", );
       }
 
     }
