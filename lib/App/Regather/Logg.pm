@@ -9,14 +9,16 @@ use diagnostics;
 use Sys::Syslog qw(:standard :macros);
 use Mail::Send;
 use Sys::Hostname;
-use Data::Printer caller_info => 1, class => { expand => 2 };
+use Data::Printer
+  caller_info  => 1,
+  class        => { expand => 2 },
+  show_dualvar => 'off' ;
 
 # https://upload.wikimedia.org/wikipedia/commons/1/15/Xterm_256color_chart.svg
-use constant dpc => { info    => 'ansi113',
-		      err     => 'bold ansi255 on_ansi196',
-		      debug   => 'ansi195', #grey18', #bright_yellow',
-#		      warning => 'bold ansi237 on_ansi214', #bright_yellow',
-		      warning => 'ansi214', #bright_yellow',
+use constant dpc => { info    => '#87ff87',
+		      err     => '#ff5f5f',
+		      debug   => '#00afff',
+		      warning => '#ffff00',
 		    };
 
 =pod
@@ -156,7 +158,8 @@ sub conclude {
   $arg{pr_f} = sprintf("%s: ", uc($arg{pr}) );
 
   if ( exists $args{ls} ) {
-    @{$arg{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ } @{$args{ls}};
+    @{$arg{ls}} = map { ref && ref ne 'SCALAR' ? np($_, caller_info => 0) : $_ }
+      @{$args{ls}};
   } else {
     $arg{ls} = [];
   }
@@ -166,8 +169,13 @@ sub conclude {
     p($arg{msg},
       colored     => $self->{colors} && $self->{foreground},
       caller_info => 0,
-      color       => { string => dpc->{$arg{pr}}},
-      output      => 'stdout' );
+      colors      => { string => dpc->{$arg{pr}},
+		       quotes => dpc->{$arg{pr}}, },
+      output      => 'stdout',
+      array_max   => 0,
+      hash_max    => 0,
+      string_max  => 0
+     );
   } else {
     syslog( $arg{pr_s}, $arg{pr_f} . $arg{fm}, @{$arg{ls}} );
   }

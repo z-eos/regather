@@ -205,7 +205,8 @@ sub get_ldap_config_file {
 
 	  $self->add_value( 'ldap.' . $section . '.' . $item,
 
-			    $section eq 'ssl' && $item eq 'verify' && $cf->is_set('tls_reqcert')
+			    $section eq 'ssl' && $item eq 'verify' &&
+			    $cf->is_set('tls_reqcert')
 			    ?
 			    LDAP->{$section}->{$item}->{tls_reqcert}->{ $cf->get('tls_reqcert') }
 			    :
@@ -237,8 +238,10 @@ sub mangle {
   if ( $self->is_set(qw(core uid)) ) {
     $item = getpwnam( $self->get(qw(core uid)) );
     if ( defined $item ) {
-      $self->{logger}->cc( pr => 'info', fm => "%s: setuid user %s(%s) confirmed",
-			   ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->get(qw(core uid)), $item ] )
+      $self->{logger}->cc( pr => 'info',
+			   fm => "%s: setuid user %s(%s) confirmed",
+			   ls => [ sprintf("%s:%s",__FILE__,__LINE__),
+				   $self->get(qw(core uid)), $item ] )
 	if $self->{verbose} > 1;
       $self->set('core', 'uid_number', $item);
     } else {
@@ -250,8 +253,10 @@ sub mangle {
   if ( $self->is_set(qw(core gid)) ) {
     $item = getgrnam( $self->get(qw(core gid)) );
     if ( defined $item ) {
-      $self->{logger}->cc( pr => 'info', fm => "%s: setgid group %s(%s) confirmed",
-			   ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->get(qw(core gid)), $item ] )
+      $self->{logger}->cc( pr => 'info',
+			   fm => "%s: setgid group %s(%s) confirmed",
+			   ls => [ sprintf("%s:%s",__FILE__,__LINE__),
+				   $self->get(qw(core gid)), $item ] )
 	if $self->{verbose} > 1;
       $self->set('core', 'gid_number', $item);
     } else {
@@ -264,8 +269,10 @@ sub mangle {
     if ( $self->is_set(qw($svc uid)) ) {
       $item = getpwnam( $self->get(qw($svc uid)) );
       if ( defined $item ) {
-	$self->{logger}->cc( pr => 'info', fm => "%s: setuid user %s(%s) confirmed",
-			     ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->get(qw($svc uid)), $item ] )
+	$self->{logger}->cc( pr => 'info',
+			     fm => "%s: setuid user %s(%s) confirmed",
+			     ls => [ sprintf("%s:%s",__FILE__,__LINE__),
+				     $self->get(qw($svc uid)), $item ] )
 	  if $self->{verbose} > 1;
 	$self->set($svc, 'uid_number', $item);
       } else {
@@ -277,8 +284,10 @@ sub mangle {
     if ( $self->is_set($svc, 'gid') ) {
       $item = getgrnam( $self->get($svc, 'gid') );
       if ( defined $item ) {
-	$self->{logger}->cc( pr => 'info', fm => "%s: setgid group %s(%s) confirmed",
-			     ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->get(qw($svc gid)), $item ] )
+	$self->{logger}->cc( pr => 'info',
+			     fm => "%s: setgid group %s(%s) confirmed",
+			     ls => [ sprintf("%s:%s",__FILE__,__LINE__),
+				     $self->get(qw($svc gid)), $item ] )
 	  if $self->{verbose} > 1;
 	$self->set($svc, 'gid_number', $item);
       } else {
@@ -293,12 +302,14 @@ sub mangle {
 	if ( $plg eq 'nsupdate' ) {
 	  eval { require Net::DNS };
 	  if ( $@ =~ /$re_mod/ ) {
-	    print "ERROR: ", sprintf("%s:%s",__FILE__,__LINE__), ": ", $@, "\n";
+	    print "ERROR: ", sprintf("%s:%s",__FILE__,__LINE__),
+	      ": ", $@, "\n";
 	    exit 2;
 	  }
 
 	  if ( ! $self->is_set('service', $svc, 'ns_attr') ) {
-	    print sprintf("%s:%s",__FILE__,__LINE__), ": service $svc lacks ns_attr option\n";
+	    print sprintf("%s:%s",__FILE__,__LINE__),
+	      ": service $svc lacks ns_attr option\n";
 	    exit 2;
 	  }
 	}
@@ -306,18 +317,21 @@ sub mangle {
 	if ($plg eq 'configfile' ) {
 	  eval { require Template };
 	  if ( $@ =~ /$re_mod/ ) {
-	    print "ERROR: ", sprintf("%s:%s",__FILE__,__LINE__), ": ", $@, "\n";
+	    print "ERROR: ", sprintf("%s:%s",__FILE__,__LINE__),
+	      ": ", $@, "\n";
 	    exit 2;
 	  }
 
 	  eval { require File::Temp };
 	  if ( $@ =~ /$re_mod/ ) {
-	    print "ERROR: ", sprintf("%s:%s",__FILE__,__LINE__), ": ", $@, "\n";
+	    print "ERROR: ", sprintf("%s:%s",__FILE__,__LINE__),
+	      ": ", $@, "\n";
 	    exit 2;
 	  }
 
 	  if ( ! $self->is_set('service', $svc, 'tt_file') ) {
-	    print sprintf("%s:%s",__FILE__,__LINE__), ": service $svc lacks tt_file option\n";
+	    print sprintf("%s:%s",__FILE__,__LINE__),
+	      ": service $svc lacks tt_file option\n";
 	    exit 2;
 	  }
 	}
@@ -330,16 +344,19 @@ sub mangle {
   if ( $self->is_set(qw(core altroot)) ) {
     chdir($self->get(qw(core altroot))) || do {
       $self->{logger}->cc( pr => 'err', fm => "%s: unable to chdir to %s",
-			   ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->get(qw(core altroot)) ] );
+			   ls => [ sprintf("%s:%s",__FILE__,__LINE__),
+				   $self->get(qw(core altroot)) ] );
       exit 1;
     };
 
     foreach ( $self->names_of('service') ) {
       $self->add_value('service.' . $_ . '.out_path',
 		       substr($self->get('service', $_, 'out_path'), 1),
-		       new Text::Locus(sprintf("in \"%s\" ", $self->get(qw(core altroot))), 1)) ||
+		       new Text::Locus(sprintf("in \"%s\" ",
+					       $self->get(qw(core altroot))), 1)) ||
 			 exit 1;
-      $self->{logger}->cc( pr => 'debug', fm => "%s: service %s out_path has been changed to %s",
+      $self->{logger}->cc( pr => 'debug',
+			   fm => "%s: service %s out_path is changed to %s",
 			   ls => [ sprintf("%s:%s",__FILE__,__LINE__), $_, $self->get('service', $_, 'out_path') ] )
 	if $self->{verbose} > 1;
     }
@@ -690,22 +707,24 @@ chown	     = NUMBER :default 1
 ctrl_attr    = STRING :mandatory :array
 ctrl_srv_re  = STRING :mandatory
 gid          = STRING
+notify       = NUMBER :default 0 :check=chk_depend_notify
+ns_attr      = STRING
+ns_attr_ip   = STRING
+ns_keyfile   = STRING
+ns_rr_type   = STRING :array
+ns_server    = STRING :array
+ns_ttl       = NUMBER :default 600
+ns_txt_pfx   = STRING :default REGATHER:
+ns_zone      = STRING :array
 out_ext      = STRING
 out_file     = STRING
 out_file_pfx = STRING
 out_path     = STRING :check=chk_dir
-tt_file      = STRING :check=chk_file_tt
-uid          = STRING
-ns_attr      = STRING
-ns_keyfile   = STRING
-ns_ttl       = NUMBER :default 600
-ns_txt_pfx   = STRING :default REGATHER:
-ns_server    = STRING :array
-ns_zone      = STRING :array
 plugin       = STRING :mandatory :array :check=chk_plugin
-notify       = NUMBER :default 0 :check=chk_depend_notify
 post_process = STRING :array
 skip         = NUMBER :default 0
+tt_file      = STRING :check=chk_file_tt
+uid          = STRING
 
 [service ANY map s]
 ANY          = STRING

@@ -12,6 +12,7 @@ use File::Basename;
 use Getopt::Long qw(:config no_ignore_case gnu_getopt auto_version);
 use IPC::Open2;
 use List::Util   qw(uniqstr);
+use List::MoreUtils qw(any);
 
 use Net::LDAP;
 use Net::LDAP::LDIF;
@@ -44,6 +45,12 @@ use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDA
 # my @DAEMONARGS = ($0, @ARGV);
 our $VERSION   = '0.85.00';
 
+=head2 new
+
+method `new` - constructor
+
+=cut
+
 sub new {
   my $class = shift;
   my $self =
@@ -62,7 +69,7 @@ sub new {
 		      ts_fmt      => "%a %F %T %Z (%z)",
 		      v           => 0,
 		     }
-	   }, $class;
+	  }, $class;
 
   GetOptions(
 	     'f|foreground' => \$self->{_opt}{fg},
@@ -147,6 +154,12 @@ sub o {
   return $self->{_opt}{$opt};
 }
 
+=head2 run()
+
+method `run`
+
+=cut
+
 sub run {
   my $self = shift;
 
@@ -217,7 +230,7 @@ sub run {
     if ( $self->cf->is_set(qw(core altroot)) ) {
       chdir($self->cf->get(qw(core altroot))) || do {
 	$self->l->cc( pr => 'err', fm => "%s:%s: main: unable to chdir to %s",
-		  ls => [ __FILE__,__LINE__, $self->cf->get(qw(core altroot)) ] );
+		      ls => [ __FILE__,__LINE__, $self->cf->get(qw(core altroot)) ] );
 	exit 1;
       };
     }
@@ -281,14 +294,14 @@ sub run {
 					    critical => 1,
 					    cookie   => undef, );
 
-    $mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch base)),
-				      scope    => $self->cf->get(qw(ldap srch scope)),
-				      control  => [ $self->o('req') ],
-				      callback => sub {$self->ldap_search_callback(@_)},
-				      filter   => $self->cf->get(qw(ldap srch filter)),
-				      attrs    => $cfgattrs,
-				      sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
-				      timelimit=> $self->cf->get(qw(ldap srch timelimit)),
+    $mesg = $self->o('ldap')->search( base      => $self->cf->get(qw(ldap srch base)),
+				      scope     => $self->cf->get(qw(ldap srch scope)),
+				      control   => [ $self->o('req') ],
+				      callback  => sub {$self->ldap_search_callback(@_)},
+				      filter    => $self->cf->get(qw(ldap srch filter)),
+				      attrs     => $cfgattrs,
+				      sizelimit => $self->cf->get(qw(ldap srch sizelimit)),
+				      timelimit => $self->cf->get(qw(ldap srch timelimit)),
 				    );
     if ( $mesg->code ) {
       $self->l->cc( pr => 'err',
@@ -325,6 +338,12 @@ sub run {
 ## ===================================================================
 #
 
+=head2 daemonize()
+
+method `daemonize`
+
+=cut
+
 sub daemonize {
   my $self = shift;
 
@@ -348,11 +367,11 @@ sub daemonize {
     $orphaned_pid_mtime = strftime( $self->o('ts_fmt'), localtime( (stat( $self->cf->get(qw(core pid_file)) ))[9] ));
     if ( unlink $self->cf->get(qw(core pid_file)) ) {
       $self->l->cc( pr => 'debug', fm => "%s:%s: orphaned %s was removed",
-		ls => [ __FILE__,__LINE__, $self->cf->get(qw(core pid_file)) ] )
+		    ls => [ __FILE__,__LINE__, $self->cf->get(qw(core pid_file)) ] )
 	if $self->o('v') > 0;
     } else {
       $self->l->cc( pr => 'err', fm => "%s:%s: orphaned %s (mtime: %s) was not removed: %s",
-		ls => [ __FILE__,__LINE__, $self->cf->get(qw(core pid_file)), $orphaned_pid_mtime, $! ] );
+		    ls => [ __FILE__,__LINE__, $self->cf->get(qw(core pid_file)), $orphaned_pid_mtime, $! ] );
       exit 2;
     }
 
@@ -368,13 +387,18 @@ sub daemonize {
   open( $pp, ">", $self->cf->get(qw(core pid_file))) || do {
     print "Can't open $self->cf->get(qw(core pid_file)) for writing: $!"; exit 1; };
   print $pp "$$";
-  close( $pp ) || do {
-    print "close $self->cf->get(qw(core pid_file)) (opened for writing), failed: $!\n\n"; exit 1; };
+  close( $pp ) ||
+    do {
+      print "close $self->cf->get(qw(core pid_file)) (opened for writing), failed: $!\n\n";
+      exit 1; };
 
   if ( $self->o('v') > 1 ) {
-    open (STDIN,  "</dev/null") || do { print "Can't redirect /dev/null to STDIN\n\n";  exit 1; };
-    open (STDOUT, ">/dev/null") || do { print "Can't redirect STDOUT to /dev/null\n\n"; exit 1; };
-    open (STDERR, ">&STDOUT")   || do { print "Can't redirect STDERR to STDOUT\n\n";    exit 1; };
+    open (STDIN,  "</dev/null") ||
+      do { print "Can't redirect /dev/null to STDIN\n\n";  exit 1; };
+    open (STDOUT, ">/dev/null") ||
+      do { print "Can't redirect STDOUT to /dev/null\n\n"; exit 1; };
+    open (STDERR, ">&STDOUT")   ||
+      do { print "Can't redirect STDERR to STDOUT\n\n";    exit 1; };
   }
 
   $SIG{HUP}  =
@@ -399,286 +423,233 @@ sub daemonize {
   $self->l->cc( pr => 'info', fm => "%s:%s: %s v.%s is started.", ls => [ __FILE__,__LINE__, $self->progname, $VERSION ] );
 }
 
+
+
+=head2 ldap_search_callback
+
+method `ldap_search_callback`
+
+=cut
+
 sub ldap_search_callback {
   my ( $self, $msg, $obj ) = @_;
-
 
   my @controls = $msg->control;
   my $syncstate = scalar @controls ? $controls[0] : undef;
 
-  my ( $s, $st, $mesg, $entry, @entries, $ldif, $map,
-       $out_file_pfx_old,
-       $tmp_debug_msg,
-       $rdn, $rdn_old, $rdn_re,
+  my ( $s, $st, $mesg, $entry, @entries, $ldif, $map, $filter,
+       $entryUUID, $obj_full, $reqType,
+       $out_file_pfx_old, $tmp_debug_msg, $rdn, $rdn_old, $rdn_re,
        $pp, $chin, $chou, $chst, $cher, $email, $email_body );
-
-  ######## !! not needed ?
-  my $out_file_old;
-  
-  $self->l->cc( pr => 'debug', fm => "%s:%s: syncstate: %s", ls => [ __FILE__,__LINE__, $syncstate ] )
-    if $self->o('v') > 5;
-  $self->l->cc( pr => 'debug', fm => "%s:%s: object: %s", ls => [ __FILE__,__LINE__, $obj ] ) if $self->o('v') > 5;
 
   if ( defined $obj && $obj->isa('Net::LDAP::Entry') ) {
     $rdn = ( split(/=/, ( split(/,/, $obj->dn) )[0]) )[0];
     if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
-      $self->l->cc( pr => 'debug', fm => "%s:%s: SYNCSTATE:\n%s:", ls => [ __FILE__,__LINE__, $syncstate ] )
+      $self->l->cc( pr => 'debug', fm => "%s:%s: SYNCSTATE:\n%s:",
+		    ls => [ __FILE__,__LINE__, $syncstate ] )
 	if $self->o('v') > 4;
       $st = $syncstate->state;
       my %reqmod;
-      $self->l->cc( fm => "%s:%s: received control %s: dn: %s", ls => [ __FILE__,__LINE__, SYNST->[$st], $obj->dn ] );
+      $self->l->cc( fm => "%s:%s: received control %s: dn: %s",
+		    ls => [ __FILE__,__LINE__, SYNST->[$st], $obj->dn ] );
+
+      $self->l->cc( pr => 'debug', fm => "%s:%s: %s: plugins to run: %s",
+		    ls => [ __FILE__,__LINE__, SYNST->[$st],
+			    $self->{_opt}{svc} ] )
+	if $self->o('v') > 5;
 
       #######################################################################
       ####### --- PRELIMINARY STUFF ----------------------------->>>>>>>>> 0
       #######################################################################
 
-      ### LDAP_SYNC_DELETE arrives for both cases, object deletetion and attribute
-      ### deletion and in both cases Net::LDAP::Entry obj, provided contains only DN,
-      ### so, we need to "re-construct" it for further processing
-      if ( $st == LDAP_SYNC_DELETE ) {
-	$mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
-			       scope    => 'sub',
-			       sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
-			       timelimit=> $self->cf->get(qw(ldap srch timelimit)),
-			       filter   => '(reqDN=' . $obj->dn . ')', );
+      # if ( $st == LDAP_SYNC_DELETE || $st == LDAP_SYNC_MODIFY ) {
+
+      $self->l->cc( pr => 'debug', fm => "%s:%s: msg: %s",
+		    ls => [ __FILE__,__LINE__, $msg ] )
+	if $self->o('v') > 5;
+      $self->l->cc( pr => 'debug', fm => "%s:%s: syncstate: %s",
+		    ls => [ __FILE__,__LINE__, $syncstate ] )
+	if $self->o('v') > 5;
+      $self->l->cc( pr => 'debug', fm => "%s:%s: object: %s",
+		    ls => [ __FILE__,__LINE__, $obj->ldif ] )
+	if $self->o('v') > 5;
+
+      if ( $st == LDAP_SYNC_DELETE ) { ###-----------------------------
+
+
+	### !!! acclog object comes *after* the event
+	sleep 2;
+	$filter = '(&(reqType=delete)(reqDN=' . $obj->dn . '))';
+	$mesg = $self->o('ldap')->
+	  search( base => $self->cf->get(qw(ldap srch log_base)),
+		  scope     => 'sub',
+		  sizelimit => $self->cf->get(qw(ldap srch sizelimit)),
+		  timelimit => $self->cf->get(qw(ldap srch timelimit)),
+		  filter    => $filter, );
 	if ( $mesg->code ) {
 	  $self->l->cc( pr => 'err', nt => 1,
-		    fm => "%s:%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		    ls => [ __FILE__,__LINE__, SYNST->[$st],
-			    'base: ',   $self->cf->get(qw(ldap srch log_base)),
-			    'scope: ',  'sub',
-			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
+			fm => "%s:%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			ls => [ __FILE__,__LINE__, SYNST->[$st],
+				'base: ',   $self->cf->get(qw(ldap srch log_base)),
+				'scope: ',  'sub',
+				'filter: ', $filter ] );
 	  $self->l->cc_ldap_err( mesg => $mesg );
 	  # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
 	} else {
 	  if ( $mesg->count == 0 ) {
 	    $self->l->cc( pr => 'err', nt => 1,
-			  fm => "%s:%s: LDAP accesslog search on %s, returned no result:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
+			  fm => "%s:%s: LDAP accesslog search on %s, returned no result:\n% 13s%s\n% 13s%s\n% 13s%s",
 			  ls => [ __FILE__,__LINE__, SYNST->[$st],
 				  'base: ',   $self->cf->get(qw(ldap srch log_base)),
 				  'scope: ',  'sub',
-				  'filter: ', '(reqDN=' . $obj->dn . ')' ] );
+				  'filter: ', $filter ] );
 	    return;
 	  } else {
+	    ### here we pop out the latest log record
 	    $entry = pop @{[$mesg->sorted]};
-	  }
 
-	  if ( defined $entry && ! $entry->isa('Net::LDAP::Entry') ) {
-	    $self->l->cc( pr => 'err', nt => 1,
-		      fm => "%s:%s: LDAP accesslog search on %s, returned no result:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		      ls => [ __FILE__,__LINE__, SYNST->[$st],
-			      'base: ',   $self->cf->get(qw(ldap srch log_base)),
-			      'scope: ',  'sub',
-			      'filter: ', '(reqDN=' . $obj->dn . ')' ] );
-	    return;
-	  } elsif ( defined $entry && $entry->get_value('reqType') eq 'delete' ) {
-	    my $reqold = 'dn: ' . $obj->dn;
-	    foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
-	      s/^(.*;binary:) .*$/$1: c3R1Yg==/agis;
-	      $reqold .= "\n" . $_;
-	    }
-	    my ( $file, @err );
-	    open( $file, "<", \$reqold) ||
-	      $self->l->cc( pr => 'err',
-			fm => "%s:%s: Cannot open data from variable to read ldif: %s",
-			ls => [ __FILE__,__LINE__, $! ] );
-	    $ldif = Net::LDAP::LDIF->new( $file, "r", onerror => 'warn' );
-	    while ( not $ldif->eof ) {
-	      $entry = $ldif->read_entry;
-	      $self->l->cc( pr => 'err', fm => "%s:%s: Reading LDIF error: %s",
-			ls => [ __FILE__,__LINE__, $ldif->error ] ) if $ldif->error;
-	    }
-	    $obj = $entry;
-	    $ldif->done;
-	  } elsif ( defined $entry && $entry->get_value('reqType') eq 'modify' ) {
-	    ### here we re-assemble $obj to have all attributes before deletion and since
-	    ### after that it'll has ctrl_attr but reqType=delete, it'll go to $st == LDAP_SYNC_DELETE
-	    %reqmod = map  { substr($_, 0, -2) => 1 } grep { /^(.*):-$/g }
-	      @{$entry->get_value('reqMod', asref => 1)};
-
-	    $mesg = $self->o('ldap')->search( base   => $obj->dn,
-				   scope  => 'base',
-				   filter => '(objectClass=*)', );
-	    if ( $mesg->code ) {
-	      $self->l->cc( pr => 'err', nt => 1,
-			fm => "%s:%s: LDAP search %s %s error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			ls => [ __FILE__,__LINE__, SYNST->[$st], 'reqType=modify',
-				'base: ',     $self->cf->get(qw(ldap srch log_base)),
-				'scope: ',    'sub',
-				'filter: ',   '(reqDN=' . $obj->dn . ')' ] );
-	      $self->l->cc_ldap_err( mesg => $mesg );
-	      # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
-	    } else {
-	      $obj = $mesg->entry(0);
-	      $obj->add( map { $_ => $reqmod{$_} } keys %reqmod );
-	      # $obj->add( $_ => $reqmod{$_} ) foreach ( keys %reqmod );
-	    }
-	    $self->l->cc( pr => 'debug', fm => "%s:%s: %s reqType=modify reqMod: %s",
-		      ls => [ __FILE__,__LINE__, SYNST->[$st], \%reqmod ] )	if $self->o('v') > 3;
-	  } else {
-	    $self->l->cc( pr => 'err', nt => 1,
-		      fm => "%s:%s: LDAP accesslog search on %s, returned an object but it's something wrong with it:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		      ls => [ __FILE__,__LINE__, SYNST->[$st],
-			      'base: ',   $self->cf->get(qw(ldap srch log_base)),
-			      'scope: ',  'sub',
-			      'filter: ', '(reqDN=' . $obj->dn . ')' ] );
-	    return;
+	    $self->l->cc( pr => 'debug',
+			  fm => "%s:%s: LDAP accesslog entry on %s is:\n%s\n% 13s%s\n% 13s%s\n% 13s%s",
+			  ls => [ __FILE__,__LINE__, SYNST->[$st], $entry->ldif,
+				  'base: ',   $self->cf->get(qw(ldap srch log_base)),
+				  'scope: ',  'sub',
+				  'filter: ', $filter ] )
+	      if $self->o('v') > 5;
 	  }
 	}
-      } elsif ( $st == LDAP_SYNC_MODIFY ) {
-	$mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
-			       scope    => 'sub',
-			       sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
-			       timelimit=> $self->cf->get(qw(ldap srch timelimit)),
-			       filter   => '(reqDN=' . $obj->dn . ')', );
+
+
+      } elsif ( $st == LDAP_SYNC_MODIFY ) { ###-----------------------------
+
+	### !!! acclog object comes *after* the event
+	sleep 2;
+	$filter = '(reqEntryUUID=' . $obj->get_value('entryUUID') . ')';
+	$mesg = $self->o('ldap')->
+	  search( base      => $self->cf->get(qw(ldap srch log_base)),
+		  scope     => 'sub',
+		  sizelimit => $self->cf->get(qw(ldap srch sizelimit)),
+		  timelimit => $self->cf->get(qw(ldap srch timelimit)),
+		  filter    => $filter, );
 	if ( $mesg->code ) {
 	  $self->l->cc( pr => 'err', nt => 1,
-		    fm => "%s:%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-		    ls => [ __FILE__,__LINE__, SYNST->[$st], nt => 1,
-			    'base: ',   $self->cf->get(qw(ldap srch log_base)),
-			    'scope: ',  'sub',
-			    'filter: ', '(reqDN=' . $obj->dn . ')' ] );
-	  $self->l->cc_ldap_err( mesg => $mesg );
-	} else {
-	  if ( $mesg->count > 0 ) {
-	    ### modified object has accesslog records when it was add/modify/delete
-	    ### before, as well as ModRDN ... so, we need to be sure, there is no accesslog
-	    ### object with reqNewRDN=<$obj->dn RDN> close to the processing time of this $obj
-
-	    ### NEED TO BE FINISHED
-
-	  } elsif ( $mesg->count == 0 ) {
-	    ### modified object has no accesslog records when it was ModRDN-ed so, we search
-	    ### for accesslog object with reqNewRDN=<$obj->dn RDN> to know old object RDN to use
-	    ### it further for $out_file
-	    $mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
-				   scope    => 'sub',
-				   sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
-				   timelimit=> $self->cf->get(qw(ldap srch timelimit)),
-				   filter   => '(reqNewRDN=' . (split(/,/, $obj->dn))[0] . ')', );
-	    if ( $mesg->code ) {
-	      $self->l->cc( pr => 'err', nt => 1,
 			fm => "%s:%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			ls => [ __FILE__,__LINE__, SYNST->[$st],
+			ls => [ __FILE__,__LINE__, SYNST->[$st], nt => 1,
 				'base: ',   $self->cf->get(qw(ldap srch log_base)),
 				'scope: ',  'sub',
-				'filter: ', '(reqNewRDN=' . (split(/,/, $obj->dn))[0] . ')' ] );
-	      $self->l->cc_ldap_err( mesg => $mesg );
-	      # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
-	    } else {
-	      ### here we pick last reqNewRDN entry up, to find the latest UUID for entries
-	      ### with same DN if the object was added/deleted/ModRDN-ed several times
-	      @entries = $mesg->sorted;
-	      $entry = pop @entries;
-	      if ( defined $entry ) {
-		$rdn_re = qr/^$rdn: .*$/;
-		###### !!! NEED FIX
-		### slapd.log-20210510-regather-fails-on-rdn
-		###
-		### here we're searching master db log, and the record is absent there, while
-		### it is still present (have no idea why) in local db log ...
-		###
-		### Can't use an undefined value as an ARRAY reference at /usr/local/lib/perl5/site_perl/App/Regather.pm line 546.
-		### BEGIN failed--compilation aborted at /usr/local/bin/regather line 10 (#1)
-		###     (F) A value used as either a hard reference or a symbolic reference must
-		###     be a defined value.  This helps to delurk some insidious errors.
-		### Uncaught exception from user code:
-		###         Can't use an undefined value as an ARRAY reference at /usr/local/lib/perl5/site_perl/App/Regather.pm line 546.
-		###         BEGIN failed--compilation aborted at /usr/local/bin/regather line 10.
-		###### !!! NEED FIX
-		if ( $entry->exists('reqOld') ) {
-		  foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
-		    $rdn_old = (split(/: /, $_))[1] if /$rdn_re/;
-		  }
-		}
-		### now we reconstruct original object
-		$mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
-				       scope    => 'sub',
-				       sizelimit=> $self->cf->get(qw(ldap srch sizelimit)),
-				       timelimit=> $self->cf->get(qw(ldap srch timelimit)),
-				       filter   => sprintf("(reqEntryUUID=%s)",
-							   $entry->get_value('reqEntryUUID')) );
-		if ( $mesg->code ) {
-		  $self->l->cc( pr => 'err', nt => 1,
-			    fm => "%s:%s: LDAP accesslog search on %s, error:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
-			    ls => [ __FILE__,__LINE__, SYNST->[$st],
-				    'base: ',   $self->cf->get(qw(ldap srch log_base)),
-				    'scope: ',  'sub',
-				    'filter: ', sprintf("(reqEntryUUID=%s)",
-							$entry->get_value('reqEntryUUID') ) ] );
-		  $self->l->cc_ldap_err( mesg => $mesg );
-		  # exit $mesg->code; # !!! NEED TO DECIDE WHAT TO DO
-		} else {
-		  @entries = $mesg->sorted;
-		  if ( $entries[0]->get_value('reqType') eq 'add' ) {
-		    ### here we re-assemble $obj to have all attributes on its creation except RDN,
-		    ### which we'll set from next to the last element and since after that it'll has
-		    ### ctrl_attr but reqType=add, it'll go to $st == LDAP_SYNC_DELETE
-		    $obj->add( map { /^(.*):\+ (.*)$/g } @{$entry->get_value('reqMod', asref => 1)} );
-		    $obj->replace( $rdn => $entries[scalar(@entries) - 2]->get_value($rdn) );
-		  } else {
-		    $self->l->cc( pr => 'err', nt => 1,
-			      fm => "%s:%s: %s object (before ModRDN) to delete not found! accesslog reqType=add object not found, object reqEntryUUID=%s should be processed manually",
-			      ls => [ __FILE__,__LINE__, SYNST->[$st], $entry->get_value('reqEntryUUID') ] );
-		  }
-		}
-	      } else {
-		$self->l->cc( pr => 'err', nt => 1, ls => [ __FILE__,__LINE__, SYNST->[$st] ],
-			  fm => "%s:%s: LDAP accesslog search on %s object returned no result\n\n" );
-	      }
-	    }
-	  }
+				'filter: ', $filter ] );
+	  $self->l->cc_ldap_err( mesg => $mesg );
+	} else {
+	  ### here we pop out the latest log record
+	  $entry = pop @{[$mesg->sorted]};
+
+	  $self->l->cc( pr => 'debug',
+			fm => "%s:%s: LDAP accesslog entry on %s is:\n%s\n% 13s%s\n% 13s%s\n% 13s%s",
+			ls => [ __FILE__,__LINE__, SYNST->[$st], $entry->ldif,
+				'base: ',   $self->cf->get(qw(ldap srch log_base)),
+				'scope: ',  'sub',
+				'filter: ', $filter ] )
+	    if $self->o('v') > 5;
 	}
       }
+
+      $self->l->cc( pr => 'debug', fm => "%s:%s: %s entry reconstructed:\n%s",
+		    ls => [ __FILE__,__LINE__, SYNST->[$st], $obj->ldif ] )
+	if $self->o('v') > 3;
 
       ### picking up a service, the $obj relates to
-      my $is_ctrl_attr;
-	my $ctrl_srv_re;
-	my $s;
-      foreach ( @{$self->{_opt}{svc}} ) {
-	$is_ctrl_attr = 0;
-	foreach my $ctrl_attr ( @{$self->cf->get('service', $_, 'ctrl_attr')} ) {
-	  if ( $obj->exists( $ctrl_attr ) ) {
-	    $is_ctrl_attr++;
-	  } else {
-	    $is_ctrl_attr--;
+      my ( $is_ctrl_attr, $ctrl_srv_re, $s, $svc, $i );
+      if ( $st != LDAP_SYNC_DELETE ) {
+	foreach $svc ( @{$self->{_opt}{svc}} ) {
+	  $is_ctrl_attr = 0;
+	  foreach my $ctrl_attr ( @{$self->cf->get('service', $svc, 'ctrl_attr')} ) {
+	    if ( $obj->exists( $ctrl_attr ) ) {
+	      $is_ctrl_attr++;
+	    } else {
+	      $is_ctrl_attr--;
+	    }
 	  }
+	  $ctrl_srv_re = $self->cf->get('service', $svc, 'ctrl_srv_re');
+	  push @{$s}, $svc
+	    if $is_ctrl_attr > 0 && $obj->dn =~ qr/$ctrl_srv_re/ &&
+	    $is_ctrl_attr == scalar( @{$self->cf->get('service', $svc, 'ctrl_attr')} );
 	}
-	$ctrl_srv_re = $self->cf->get('service', $_, 'ctrl_srv_re');
-	if ( $is_ctrl_attr > 0 && $obj->dn =~ qr/$ctrl_srv_re/ &&
-	     $is_ctrl_attr == scalar( @{$self->cf->get('service', $_, 'ctrl_attr')} ) ) {
-	  $s = $_;
+      } else { ### LDAP_SYNC_DELETE $obj contains only DN
+	foreach $svc ( @{$self->{_opt}{svc}} ) {
+	  $is_ctrl_attr = 0;
+	  foreach my $ctrl_attr ( @{$self->cf->get('service', $svc, 'ctrl_attr')} ) {
+	    if ( any
+		 {
+		   /^$ctrl_attr:.*$/}
+		 @{$entry->get_value( 'reqOld', asref => 1 )} ) {
+	      $is_ctrl_attr++;
+	    } else {
+	      $is_ctrl_attr--;
+	    }
+	  }
+	  $ctrl_srv_re = $self->cf->get('service', $svc, 'ctrl_srv_re');
+	  push @{$s}, $svc
+	    if $is_ctrl_attr > 0 && $entry->get_value('reqDN') =~ qr/$ctrl_srv_re/ &&
+	    $is_ctrl_attr == scalar( @{$self->cf->get('service', $svc, 'ctrl_attr')} );
 	}
       }
 
-      if ( ! defined $s ) {
+      if ( ! defined $s || scalar(@{$s}) < 1 ) {
 	$self->l->cc( pr => 'warning', ls => [ __FILE__,__LINE__, $obj->dn, SYNST->[$st] ],
-		  fm => "%s:%s: dn: %s is not configured to be processed on control: %s" )
+		      fm => "%s:%s: dn: %s is not configured to be processed on control: %s" )
 	  if $self->o('v') > 2;
 	return;
       }
+
+=pod
+
+In plugins we use LDAP object to get consequent data, but remember:
+
+=over
+
+=item B<LDAP_SYNC_ADD>
+
+is satisfied with the object provided by search to callback (in
+reality it is full data to create new object)
+
+=item B<LDAP_SYNC_MODIFY> and B<LDAP_SYNC_DELETE>
+
+require former data, so, the object provided by search to callback, a
+consequent accesslog object is provided as well
+
+=back
+
+=cut
 
       #######################################################################
       ####### --------------------------------------------------->>>>>>>>> 1
       #######################################################################
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
 
-	# App::Regather::Plugin->new( 'args', { log    => $self->log,
-	# 				 params => [ 1, 2, 3]} )->run;
-	foreach my $svc ( @{$self->cf->get('service', $s, 'plugin')} ) {
-	  App::Regather::Plugin->new( $svc, {
-					     cf           => $self->cf,
-					     force        => $self->o('force'),
-					     log          => $self->l,
-					     obj          => $obj,
-					     out_file_old => $out_file_old,
-					     prog         => sprintf("%s v.%s", $self->progname, $VERSION),
-					     rdn          => $rdn,
-					     s            => $s,
-					     st           => $st,
-					     ts_fmt       => $self->o('ts_fmt'),
-					     v            => $self->o('v'),
-					    } )->ldap_sync_add_modify;
+	# $self->l->cc( pr => 'err', fm => "%s: %s: obj: %s",
+	# 	     ls => [ sprintf("%s:%s",__FILE__,__LINE__),
+	# 		     SYNST->[$st], $obj->ldif ] );
+
+	foreach $i ( @{$s} ) {
+	  foreach $svc ( @{$self->cf->get('service', $i, 'plugin')} ) {
+
+	    App::Regather::Plugin->
+		new( $svc, {
+			    cf           => $self->cf,
+			    force        => $self->o('force'),
+			    log          => $self->l,
+			    obj          => $obj,
+			    obj_audit    => $entry,
+			    prog         => sprintf("%s v.%s",
+						    $self->progname,
+						    $VERSION),
+			    rdn          => $rdn,
+			    s            => $i,
+			    st           => $st,
+			    synst        => SYNST,
+			    ts_fmt       => $self->o('ts_fmt'),
+			    v            => $self->o('v'),
+			   } )->ldap_sync_add_modify;
+	  }
 	}
 
 	#######################################################################
@@ -686,37 +657,48 @@ sub ldap_search_callback {
 	#######################################################################
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 
-	foreach my $svc ( @{$self->cf->get('service', $s, 'plugin')} ) {
-	  App::Regather::Plugin->new( $svc, {
-					     cf           => $self->cf,
-					     force        => $self->o('force'),
-					     log          => $self->l,
-					     obj          => $obj,
-					     out_file_old => $out_file_old,
-					     prog         => sprintf("%s v.%s", $self->progname, $VERSION),
-					     rdn          => $rdn,
-					     s            => $s,
-					     st           => $st,
-					     ts_fmt       => $self->o('ts_fmt'),
-					     v            => $self->o('v'),
-					    } )->ldap_sync_delete;
+	foreach $i ( @{$s} ) {
+	  foreach $svc ( @{$self->cf->get('service', $i, 'plugin')} ) {
+
+	    App::Regather::Plugin->
+		new( $svc, {
+			    cf           => $self->cf,
+			    force        => $self->o('force'),
+			    log          => $self->l,
+			    obj          => $obj,
+			    obj_audit    => $entry,
+			    prog         => sprintf("%s v.%s",
+						    $self->progname,
+						    $VERSION),
+			    rdn          => $rdn,
+			    s            => $i,
+			    st           => $st,
+			    synst        => SYNST,
+			    ts_fmt       => $self->o('ts_fmt'),
+			    v            => $self->o('v'),
+			   } )->ldap_sync_delete;
+	  }
 	}
 
       }
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
-      $self->l->cc( pr => 'debug', fm => "%s: Received SYNC DONE CONTROL" ) if $self->o('v') > 1;
+      $self->l->cc( pr => 'debug', fm => "%s: Received SYNC DONE CONTROL" )
+	if $self->o('v') > 1;
     } elsif ( ! defined $syncstate ) {
-      $self->l->cc( pr => 'warning', fm => "%s: LDAP entry without Sync State control" ) if $self->o('v') > 1;
+      $self->l->cc( pr => 'warning', fm => "%s: LDAP entry without Sync State control" )
+	if $self->o('v') > 1;
     }
 
     $self->o('req')->cookie($syncstate->cookie) if $syncstate->cookie;
 
   } elsif ( defined $obj && $obj->isa('Net::LDAP::Intermediate') ) {
-    $self->l->cc( pr => 'debug', fm => "%s:%s: Received Net::LDAP::Intermediate\n%s", ls => [ __FILE__,__LINE__, $obj ] )
+    $self->l->cc( pr => 'debug', fm => "%s:%s: Received Net::LDAP::Intermediate\n%s",
+		  ls => [ __FILE__,__LINE__, $obj ] )
       if $self->o('v') > 3;
     $self->o('req')->cookie($obj->{'asn'}->{'refreshDelete'}->{'cookie'});
   } elsif ( defined $obj && $obj->isa('Net::LDAP::Reference') ) {
-    $self->l->cc( pr => 'debug', fm => "%s:%s: Received Net::LDAP::Reference\n%s", ls => [ __FILE__,__LINE__, $obj ] )
+    $self->l->cc( pr => 'debug', fm => "%s:%s: Received Net::LDAP::Reference\n%s",
+		  ls => [ __FILE__,__LINE__, $obj ] )
       if $self->o('v') > 3;
     return;
   } else {

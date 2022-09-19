@@ -90,6 +90,7 @@ sub names {
 	()
       } else {
 	eval { require $filename; };
+	print "\n--- $name ----\n\n$@\n" if $@ ne '';
 	$name =~ s/\.pm$//;
 	$@ ? () : [$name, $_];
       }

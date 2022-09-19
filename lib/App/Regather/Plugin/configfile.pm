@@ -14,12 +14,17 @@ use warnings;
 use diagnostics;
 
 use POSIX;
+use POSIX::Run::Capture qw(:std);
 use IPC::Open2;
 use File::Temp;
 use Template;
+use List::MoreUtils qw(onlyval);
 
 use Net::LDAP;
 use Net::LDAP::Util qw(generalizedTime_to_time);
+use Net::LDAP::Constant qw( LDAP_SYNC_ADD
+			    LDAP_SYNC_MODIFY
+			    LDAP_SYNC_DELETE );
 
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
@@ -43,11 +48,13 @@ sub new {
 	 force        => delete $args->{force},
 	 log          => delete $args->{log},
 	 obj          => delete $args->{obj},
+	 obj_audit    => delete $args->{obj_audit},
 	 out_file_old => delete $args->{out_file_old},
 	 prog         => delete $args->{prog},
 	 rdn          => delete $args->{rdn},
 	 service      => delete $args->{s},
 	 st           => delete $args->{st},
+	 synst        => delete $args->{synst},
 	 ts_fmt       => delete $args->{ts_fmt},
 	 v            => delete $args->{v},
 	 rest         => $args,
@@ -58,10 +65,12 @@ sub cf           { shift->{cf} }
 sub force        { shift->{force} }
 sub log          { shift->{log} }
 sub obj          { shift->{obj} }
+sub obj_audit    { shift->{obj_audit} }
 sub out_file_old { shift->{out_file_old} }
 sub rdn          { shift->{rdn} }
 sub service      { shift->{service} }
 sub syncstate    { shift->{st} }
+sub synst        { shift->{synst} }
 sub ts_fmt       { shift->{ts_fmt} }
 sub v            { shift->{v} }
 sub rest         { shift->{rest} }
@@ -69,7 +78,29 @@ sub rest         { shift->{rest} }
 
 =head2 ldap_sync_add_modify
 
-performs creation for new and re-wring for existent config file
+method to manipulate config files on
+
+=over
+
+=item B<LDAP_SYNC_ADD>
+
+create
+
+=item B<LDAP_SYNC_MODIFY>
+
+=over
+
+=item B<reqType=modify>
+
+modify
+
+=item B<reqType=modrdn>
+
+delete F<reqOld: cn> config file and create new
+
+=back
+
+=back
 
 =cut
 
@@ -78,53 +109,94 @@ sub ldap_sync_add_modify {
 
   my ($tt_vars, $pp, $chin, $chou, $chst, $cher);
 
-  $self->log->cc( pr => 'debug', fm => "%s called with arguments: %s",
-		  ls => [ sprintf("%s:%s",__FILE__,__LINE__), join(',', sort(keys( %{$self}))), ] ) if $self->{v} > 3;
+  $self->log->cc( pr => 'debug', fm => "%s:%s: called with arguments: %s",
+		  ls => [ __FILE__,__LINE__, join(',', sort(keys( %{$self}))), ] )
+    if $self->{v} > 3;
+
+  my $out_file_old;
+  if ( $self->syncstate == LDAP_SYNC_MODIFY &&
+       $self->obj_audit->get_value('reqType') eq 'modrdn' ) {
+    $out_file_old =
+      (
+       split( / /,
+	      onlyval { /^cn: .*$/ } @{$self->obj_audit->get_value('reqOld', asref => 1)} )
+      )[1];
+  }
 
   ### PREPARING OUTPUT RELATED VARIABLES
-  my %out_paths = out_paths( cf      => $self->cf,      obj => $self->obj,
-			     service => $self->service, rdn => $self->rdn, log => $self->log );
+  my %out_paths = out_paths( $self );
+
   return if ! %out_paths;
   my $out_file_pfx //= $out_paths{out_file_pfx};
   my $out_file     //= $out_paths{out_file};
   my $dir          = $out_file_pfx // $self->cf->get('service', $self->service, 'out_path');
   my $out_to       = $dir . '/' . $out_file;
 
-  $self->log->cc( pr => 'debug', fm => "%s: output directory: %s; file: %s",
-		  ls => [ sprintf("%s:%s",__FILE__,__LINE__), $dir, $out_file ] ) if $self->{v} > 2;
+  $self->log->cc( pr => 'debug', fm => "%s:%s: output directory: %s; file: %s",
+		  ls => [ __FILE__,__LINE__, $dir, $out_file ] )
+    if $self->{v} > 3;
 
-  if ( defined $self->out_file_old ) {
-    if ( unlink $dir . '/' . $self->out_file_old ) {
-      $self->log->cc( pr => 'info', fm => "%s: file %s deleted (after ModRDN)",
-		ls => [ sprintf("%s:%s",__FILE__,__LINE__), $dir . '/' . $self->out_file_old ] );
+  ### on modrdn two events occure
+  ### 1. obj->cn differs of obj_audit->reqOld->cn
+  ### 2. obj->cn equals  of obj_audit->reqOld->cn
+  ###    and it is the right moment to delete only
+  ###    reqOld file
+
+  if ( defined $out_file_old && $out_file_old eq $self->obj->get_value('cn') ) {
+    if ( unlink $dir . '/' . $out_file_old ) {
+      $self->log->cc( pr => 'info', fm => "%s:%s: file %s/%s deleted (on ModRDN)",
+		      ls => [ __FILE__,__LINE__, $dir, $out_file_old ] );
     } else {
-      $self->log->cc( pr => 'err', fm => "%s: %s not removed (after ModRDN); error: %s",
-		      ls => [ sprintf("%s:%s",__FILE__,__LINE__), $dir . '/' . $self->out_file_old, $! ], nt => 1, );
+      $self->log->cc( pr => 'err',
+		      fm => "%s:%s: %s/%s not removed (on ModRDN); error: %s",
+		      ls => [ __FILE__,__LINE__, $dir,
+			      $out_file_old, $! ], nt => 1, );
     }
+    return;
   }
 
   ### COLLECTING ALL MAPPED ATTRIBUTES VALUES
   foreach my $i ( ( 'm', 's') ) {
     if ( $self->cf->is_section('service', $self->service, 'map', $i) ) {
-      foreach my $j ( $self->cf->names_of('service', $self->service, 'map', $i) ) {
-	if ( $i eq 's' && ! $self->obj->exists( $self->cf->get('service', $self->service, 'map', $i, $j)) ) {
+      foreach my $j ( $self->cf->names_of('service',
+					  $self->service,
+					  'map', $i) ) {
+	if ( $i eq 's' &&
+	     ! $self->obj->exists( $self->cf->get('service',
+						  $self->service,
+						  'map', $i, $j)) ) {
 	  if ( $self->cf->get(qw(core dryrun)) ) {
-	    $self->log->cc( pr => 'debug', fm => "%s: DRYRUN: %s to be deleted (no attribute: %s)",
-		      ls => [ sprintf("%s:%s",__FILE__,__LINE__), $out_to, $self->cf->get('service', $self->service, 'map', $i, $j) ] );
+	    $self->log->cc( pr => 'debug',
+			    fm => "%s:%s: DRYRUN: %s to delete (no attr: %s)",
+			    ls => [ __FILE__,__LINE__, $out_to,
+				    $self->cf->get('service',
+						   $self->service,
+						   'map', $i, $j)
+				  ] );
 	  } else {
 	    if ( unlink $out_to ) {
-	      $self->log->cc( pr => 'debug', fm => "%s: file %s deleted (no attribute: %s)",
-			ls => [ sprintf("%s:%s",__FILE__,__LINE__), $out_to, $self->cf->get('service', $self->service, 'map', $i, $j) ] )
+	      $self->log->cc( pr => 'debug',
+			      fm => "%s:%s: file %s deleted (no attr: %s)",
+			      ls => [ __FILE__,__LINE__, $out_to,
+				      $self->cf->get('service',
+						     $self->service,
+						     'map', $i, $j)
+				    ] )
 		if $self->{v} > 0;
 	    } else {
-	      $self->log->cc( pr => 'err', fm => "%s: %s not removed (no attribute: %s); error: %s",
-			ls => [ sprintf("%s:%s",__FILE__,__LINE__), $out_to, $self->cf->get('service', $self->service, 'map', $i, $j), $! ],
-			nt => 1, );
+	      $self->log->cc( pr => 'err', nt => 1,
+			      fm => "%s:%s: %s not removed (no attr: %s); error: %s",
+			      ls => [ __FILE__,__LINE__, $out_to,
+				      $self->cf->get('service',
+						     $self->service,
+						     'map', $i, $j), $!
+				    ] );
 	    }
 	  }
 
-	  ### if any of `map s` attributes doesn't exist, we delete that config file
-	  ### preliminaryly and skip that attribute from been processed by Template
+	  ### if any of `map s` attributes doesn't exist, we delete
+	  ### that config file preliminaryly and skip that attribute
+	  ### from been processed by Template
 	  next;
 
 	} elsif ( $i eq 'm' && $self->obj->exists( $self->cf->get('service', $self->service, 'map', $i, $j)) ) {
@@ -242,8 +314,9 @@ sub ldap_sync_add_modify {
 		};
 
   close( $tmp_fh ) || do {
-    $self->log->cc( pr => 'err', fm => "%s: close file (opened for writing), service %s, failed: %s",
-	      ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->service, $! ] );
+    $self->log->cc( pr => 'err',
+		    fm => "%s:%s: close file (opened for writing), service %s, failed: %s",
+	      ls => [ __FILE__,__LINE__, $self->service, $! ] );
     next;
   };
 
@@ -280,9 +353,9 @@ sub ldap_sync_add_modify {
 		ls => [ sprintf("%s:%s",__FILE__,__LINE__), $out_to ] );
     }
   }
-  $self->log->cc( pr => 'debug', fm => "%s: control %s: dn: %s processed successfully.",
+  $self->log->cc( pr => 'info', fm => "%s: control %s: dn: %s processed successfully.",
 		  ls => [ sprintf("%s:%s",__FILE__,__LINE__), SYNST->[$self->syncstate], $self->obj->dn ] )
-    if $self->{v} > 0;
+    if $self->{v};
 
   if ( $self->cf->is_set('service', $self->service, 'post_process') ) {
     foreach $pp ( @{$self->cf->get('service', $self->service, 'post_process')} ) {
@@ -300,7 +373,7 @@ sub ldap_sync_add_modify {
 
 =head2 ldap_sync_delete
 
-performs deletion of an existent config file
+performs deletion of an existent config file on B<LDAP_SYNC_DELETE>
 
 =cut
 
@@ -309,36 +382,41 @@ sub ldap_sync_delete {
 
   my ($tt_vars, $pp, $chin, $chou, $chst, $cher);
 
-  $self->log->cc( pr => 'debug', fm => "%s: %s called with arguments: %s",
-	    ls => [ sprintf("%s:%s",__FILE__,__LINE__), join(',', sort(keys( %{$self}))), ] ) if $self->{v} > 3;
+  $self->log->cc( pr => 'debug', fm => "%s:%s: %s called with arguments: %s",
+		  ls => [ __FILE__,__LINE__, join(',', sort(keys( %{$self}))), ] )
+    if $self->{v} > 3;
 
   ### PREPARING OUTPUT RELATED VARIABLES
-  my %out_paths = out_paths( cf      => $self->cf,      obj => $self->obj,
-			     service => $self->service, rdn => $self->rdn, log => $self->log );
+  # my %out_paths = out_paths( cf => $self->cf, obj => $self->obj, rdn => $self->rdn,
+  # 			     syncstate => $self->syncstate, synst => $self->synst, 
+  # 			     obj_audit => $self->obj_audit, service => $self->service,
+  # 			     log => $self->log );
+  my %out_paths = out_paths( $self );
   return if ! %out_paths;
   my $out_file_pfx //= $out_paths{out_file_pfx};
   my $out_file     //= $out_paths{out_file};
   my $dir          = $out_file_pfx // $self->cf->get('service', $self->service, 'out_path');
   my $out_to       = $dir . '/' . $out_file;
 
-  $self->log->cc( pr => 'debug', fm => "%s: output directory: %s; file: %s",
-	    ls => [ sprintf("%s:%s",__FILE__,__LINE__), $dir, $out_file ] ) if $self->{v} > 2;
+  $self->log->cc( pr => 'debug', fm => "%s:%s: output directory: %s; file: %s",
+	    ls => [ __FILE__,__LINE__, $dir, $out_file ] ) if $self->{v} > 3;
 
   if ( $self->cf->get(qw(core dryrun)) ) {
-    $self->log->cc( pr => 'debug', fm => "%s: DRYRUN: file %s should be deleted",
-	      ls => [ sprintf("%s:%s",__FILE__,__LINE__), $out_to ] );
+    $self->log->cc( pr => 'debug', fm => "%s:%s: DRYRUN: file %s should be deleted",
+	      ls => [ __FILE__,__LINE__, $out_to ] );
   } else {
     if ( unlink $out_to ) {
-      $self->log->cc( pr => 'debug', fm => "%s: file %s was successfully deleted",
-		ls => [ sprintf("%s:%s",__FILE__,__LINE__), $out_to ] )
-	if $self->{v} > 0;
+      $self->log->cc( pr => 'info', fm => "%s:%s: file %s was successfully deleted",
+		ls => [ __FILE__,__LINE__, $out_to ] )
+	if $self->{v};
     } else {
       $self->log->cc( pr => 'err', fm => "%s: file %s was not removed; error: %s",
 		ls => [ sprintf("%s:%s",__FILE__,__LINE__), $out_to, $! ] );
     }
   }
-  $self->log->cc( pr => 'debug', fm => "%s: control %s: dn: %s processing finished",
-	    ls => [ sprintf("%s:%s",__FILE__,__LINE__), SYNST->[$self->syncstate], $self->obj->dn ] );
+  $self->log->cc( pr => 'debug', fm => "%s:%s: control %s: dn: %s processing finished",
+		  ls => [ __FILE__,__LINE__, SYNST->[$self->syncstate], $self->obj->dn ] )
+    if $self->{v} > 0;
 
   if ( $self->cf->is_set('service', $self->service, 'post_process') ) {
     foreach $pp ( @{$self->cf->get('service', $self->service, 'post_process')} ) {
@@ -347,47 +425,105 @@ sub ldap_sync_delete {
       $chst = $? >> 8;
       if ( $chst ) {
 	$cher .= $_ while ( <$chou> );
-	$self->log->cc( pr => 'err', ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->service, $pp, $cher ], nt => 1,
-		  fm => "%s: service %s post_process: %s, error: %s", );
+	$self->log->cc( pr => 'err', nt => 1,
+			ls => [ __FILE__,__LINE__, $self->service, $pp, $cher ],
+			fm => "%s:%s: service %s post_process: %s, error: %s", );
       }
     }
   }
 
 }
 
+=head2 B<out_paths>
 
+method to construct otput full path for situations
+
+=over
+
+=item 1. B<out_file_pfx> and B<out_file>
+
+concatenation
+
+=item 2. not B<out_file_pfx> and B<out_file>
+
+F<out_file> can contain absolute path
+
+=item 3. neither B<out_file_pfx> nor B<out_file>
+
+value can be provided with I<rdn_val> or attribute I<rdn> value of the
+object processed, is used
+
+=back
+
+=cut
 
 sub out_paths {
-  local %_ = @_;
+  my $self = shift;
 
-  my ($out_file_pfx, $out_file);
-  if ( $_{cf}->is_set('service', $_{service}, 'out_file_pfx') &&
-       $_{cf}->is_set('service', $_{service}, 'out_file') ) {
-    $out_file_pfx = $_{obj}->get_value($_{cf}->get('service', $_{service}, 'out_file_pfx'));
-    $out_file_pfx = substr($out_file_pfx, 1) if $_{cf}->is_set(qw(core altroot));
+  my ($out_file_pfx, $out_file, $rdn, $rdn_val, $re );
+
+  my $reqOld  = $self->obj_audit->get_value('reqOld', asref => 1)
+    if $self->syncstate == LDAP_SYNC_DELETE;
+
+  if ( $self->cf->is_set('service', $self->service, 'out_file_pfx') &&
+       $self->cf->is_set('service', $self->service, 'out_file') ) {
+
+    if ( $self->syncstate == LDAP_SYNC_DELETE ) { ###------------------------------
+
+      $re = $self->cf->get('service', $self->service, 'out_file_pfx');
+      $out_file_pfx = (
+		       split( / /, onlyval { /^$re.*$/ } @{$reqOld} )
+		      )[1];
+    } else {
+      $out_file_pfx = $self->obj_audit->get_value($self->cf->get('service',
+							   $self->service,
+							   'out_file_pfx'));
+    }
+
+    $out_file_pfx = substr($out_file_pfx, 1) if $self->cf->is_set(qw(core altroot));
     if ( ! -d $out_file_pfx ) {
-      $_{log}->cc( pr => 'err', fm => "%s: service %s, target directory %s doesn't exist",
-		   ls => [ sprintf("%s:%s",__FILE__,__LINE__), $_{service}, $out_file_pfx ] );
+      $self->log->cc( pr => 'err', fm => "%s: service %s, target directory %s doesn't exist",
+		   ls => [ sprintf("%s:%s",__FILE__,__LINE__), $self->service, $out_file_pfx ] );
       return ();
     } else {
       $out_file = sprintf("%s%s",
-			  $_{cf}->get('service', $_{service}, 'out_file'),
-                          $_{cf}->get('service', $_{service}, 'out_ext') // '');
+			  $self->cf->get('service', $self->service, 'out_file'),
+                          $self->cf->get('service', $self->service, 'out_ext') // '');
     }
-  } elsif ( ! $_{cf}->is_set('service', $_{service}, 'out_file_pfx') &&
-            $_{cf}->is_set('service', $_{service}, 'out_file')) {
+
+  } elsif ( ! $self->cf->is_set('service', $self->service, 'out_file_pfx') &&
+            $self->cf->is_set('service', $self->service, 'out_file')) {
+
     $out_file = sprintf("%s%s",
-			$_{cf}->get('service', $_{service}, 'out_file'),
-                        $_{cf}->get('service', $_{service}, 'out_ext') // '');
-  } elsif ( ! $_{cf}->is_set('service', $_{service}, 'out_file_pfx') &&
-            ! $_{cf}->is_set('service', $_{service}, 'out_file')) {
+			$self->cf->get('service', $self->service, 'out_file'),
+                        $self->cf->get('service', $self->service, 'out_ext') // '');
+
+  } elsif ( ! $self->cf->is_set('service', $self->service, 'out_file_pfx') &&
+            ! $self->cf->is_set('service', $self->service, 'out_file')) {
+
+    if ( $self->syncstate == LDAP_SYNC_DELETE ) { ###------------------------------
+
+      $re = $self->rdn;
+      $rdn_val = (
+		  split( / /, onlyval { /^${re}:.*$/ } @{$reqOld} )
+		 )[1];
+    } else {
+      $rdn_val = $self->obj->get_value($self->rdn);
+    }
+
     $out_file = sprintf("%s%s",
-			$_{rdn_val} // $_{obj}->get_value($_{rdn}),
-                        $_{cf}->get('service', $_{service}, 'out_ext') // '');
+			$rdn_val,
+                        $self->cf->get('service', $self->service, 'out_ext') // '');
   }
 
   return ( out_file_pfx => $out_file_pfx, out_file => $out_file );
 }
+
+=head2 opensslize
+
+method toconvert between openssl cert formats
+
+=cut
 
 sub opensslize {
   my $args = shift;
@@ -395,20 +531,21 @@ sub opensslize {
 	      in      => $args->{in},
 	      inform  => $args->{inform}  // 'DER',
 	      outform => $args->{outform} // 'PEM',
+	      log     => $args->{log}
 	    };
 
-  my ( $chin, $chou );
-  my $pid = open2($chou, $chin,
-		  '/usr/bin/openssl', $arg->{cmd}, '-inform', $arg->{inform}, '-outform', $arg->{outform});
+  my $obj = POSIX::Run::Capture( argv => [
+					  '/usr/bin/openssl',
+					  $arg->{cmd},
+					  '-inform',  $arg->{inform},
+					  '-outform', $arg->{outform}
+					 ] );
 
-  print $chin $arg->{in};
-  waitpid( $pid, 0 );
-  my $chst = $? >> 8;
+  $arg->{log}->cc( pr => 'err', ls => [ __FILE__, __LINE__, $obj->errno ],
+		   fm => "%s:%s: opensslize() error: %s" )
+    if ! $obj->run;
 
-  $args->{log}->cc( pr => 'err', fm => "%s: opensslize() error!", ls => [ sprintf("%s:%s",__FILE__,__LINE__) ] )
-    if $chst && $args->{v} > 1;
-
-  $arg->{res} .= $_ while ( <$chou> );
+  $arg->{res} =  join '', @{$obj->get_lines(SD_STDOUT)};
 
   return $arg->{res};
 }
