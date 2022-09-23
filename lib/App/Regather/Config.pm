@@ -705,6 +705,7 @@ all_attr     = NUMBER :default 0
 chmod        = OCTAL  :default 0640
 chown	     = NUMBER :default 1
 ctrl_attr    = STRING :mandatory :array
+ctrl_attr_re = STRING
 ctrl_srv_re  = STRING :mandatory
 gid          = STRING
 notify       = NUMBER :default 0 :check=chk_depend_notify

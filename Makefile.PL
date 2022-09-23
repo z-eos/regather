@@ -22,11 +22,12 @@ WriteMakefile(NAME             => 'App::Regather',
 	       'Mail::Send'            => '0.80',
 	       'Net::DNS'              => '1.15',
 	       'Net::LDAP'             => '0.65',
+	       'POSIX::Run::Capture'   => '1.03',
 	       'Sys::Syslog'           => '0.29',
 	       'Template'              => '2.29',
 	       'Text::Locus'           => '1.01',
 	      },
-              META_MERGE      =>
+              META_MERGE =>
 	      {
 	       'meta-spec' => { version => 2 },
 	       resources   =>

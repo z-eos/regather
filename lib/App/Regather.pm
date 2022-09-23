@@ -12,7 +12,7 @@ use File::Basename;
 use Getopt::Long qw(:config no_ignore_case gnu_getopt auto_version);
 use IPC::Open2;
 use List::Util   qw(uniqstr);
-use List::MoreUtils qw(any);
+use List::MoreUtils qw(any onlyval);
 
 use Net::LDAP;
 use Net::LDAP::LDIF;
@@ -43,7 +43,7 @@ use App::Regather::Plugin;
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 # my @DAEMONARGS = ($0, @ARGV);
-our $VERSION   = '0.85.00';
+our $VERSION   = '0.90.00';
 
 =head2 new
 
@@ -447,7 +447,7 @@ sub ldap_search_callback {
     if ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncState') ) {
       $self->l->cc( pr => 'debug', fm => "%s:%s: SYNCSTATE:\n%s:",
 		    ls => [ __FILE__,__LINE__, $syncstate ] )
-	if $self->o('v') > 4;
+	if $self->o('v') > 5;
       $st = $syncstate->state;
       my %reqmod;
       $self->l->cc( fm => "%s:%s: received control %s: dn: %s",
@@ -458,11 +458,9 @@ sub ldap_search_callback {
 			    $self->{_opt}{svc} ] )
 	if $self->o('v') > 5;
 
-      #######################################################################
-      ####### --- PRELIMINARY STUFF ----------------------------->>>>>>>>> 0
-      #######################################################################
-
-      # if ( $st == LDAP_SYNC_DELETE || $st == LDAP_SYNC_MODIFY ) {
+      ############################################################
+      ####### --- PRELIMINARY STUFF ------------------>>>>>>>>> 0
+      ############################################################
 
       $self->l->cc( pr => 'debug', fm => "%s:%s: msg: %s",
 		    ls => [ __FILE__,__LINE__, $msg ] )
@@ -474,7 +472,7 @@ sub ldap_search_callback {
 		    ls => [ __FILE__,__LINE__, $obj->ldif ] )
 	if $self->o('v') > 5;
 
-      if ( $st == LDAP_SYNC_DELETE ) { ###-----------------------------
+      if ( $st == LDAP_SYNC_DELETE ) { ###------------------------
 
 
 	### !!! acclog object comes *after* the event
@@ -519,7 +517,7 @@ sub ldap_search_callback {
 	}
 
 
-      } elsif ( $st == LDAP_SYNC_MODIFY ) { ###-----------------------------
+      } elsif ( $st == LDAP_SYNC_MODIFY ) { ###-------------------
 
 	### !!! acclog object comes *after* the event
 	sleep 2;
@@ -548,30 +546,37 @@ sub ldap_search_callback {
 				'base: ',   $self->cf->get(qw(ldap srch log_base)),
 				'scope: ',  'sub',
 				'filter: ', $filter ] )
-	    if $self->o('v') > 5;
+	    if $self->o('v') > 3;
 	}
+      } elsif ( $st == LDAP_SYNC_ADD ) { ###-------------------
+	$entry = $obj;
       }
 
-      $self->l->cc( pr => 'debug', fm => "%s:%s: %s entry reconstructed:\n%s",
-		    ls => [ __FILE__,__LINE__, SYNST->[$st], $obj->ldif ] )
-	if $self->o('v') > 3;
-
       ### picking up a service, the $obj relates to
-      my ( $is_ctrl_attr, $ctrl_srv_re, $s, $svc, $i );
+      my ( $is_ctrl_attr, $ctrl_attr_re, $ctrl_attr_val, $ctrl_srv_re, $s, $svc, $i );
       if ( $st != LDAP_SYNC_DELETE ) {
 	foreach $svc ( @{$self->{_opt}{svc}} ) {
 	  $is_ctrl_attr = 0;
 	  foreach my $ctrl_attr ( @{$self->cf->get('service', $svc, 'ctrl_attr')} ) {
-	    if ( $obj->exists( $ctrl_attr ) ) {
-	      $is_ctrl_attr++;
+
+	    if ( my $ctrl_attrs = $obj->get_value( $ctrl_attr, asref => 1 ) ) {
+	      $ctrl_attr_re = $self->cf->get('service', $svc, 'ctrl_attr_re');
+	      $ctrl_attr_val =
+		onlyval { /^.*$ctrl_attr_re.*$/ } @{$ctrl_attrs};
+	      if ( defined $ctrl_attr_val ) {
+		$is_ctrl_attr++;
+	      } else {
+		$is_ctrl_attr--;
+	      }
 	    } else {
 	      $is_ctrl_attr--;
 	    }
+
 	  }
 	  $ctrl_srv_re = $self->cf->get('service', $svc, 'ctrl_srv_re');
 	  push @{$s}, $svc
-	    if $is_ctrl_attr > 0 && $obj->dn =~ qr/$ctrl_srv_re/ &&
-	    $is_ctrl_attr == scalar( @{$self->cf->get('service', $svc, 'ctrl_attr')} );
+	    if $is_ctrl_attr > 0 && $obj->dn =~ qr/$ctrl_srv_re/;
+
 	}
       } else { ### LDAP_SYNC_DELETE $obj contains only DN
 	foreach $svc ( @{$self->{_opt}{svc}} ) {
@@ -596,7 +601,7 @@ sub ldap_search_callback {
       if ( ! defined $s || scalar(@{$s}) < 1 ) {
 	$self->l->cc( pr => 'warning', ls => [ __FILE__,__LINE__, $obj->dn, SYNST->[$st] ],
 		      fm => "%s:%s: dn: %s is not configured to be processed on control: %s" )
-	  if $self->o('v') > 2;
+	  if $self->o('v') > 3;
 	return;
       }
 
@@ -620,48 +625,53 @@ consequent accesslog object is provided as well
 
 =cut
 
-      #######################################################################
-      ####### --------------------------------------------------->>>>>>>>> 1
-      #######################################################################
-      if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
+      $self->l->cc( pr => 'debug',
+		    fm => "%s:%s: %s obj:%s\nobj_audit:%s",
+		    ls => [ __FILE__,__LINE__, SYNST->[$st],
+			    $obj->ldif,
+			    $entry->ldif ] )
+	if $self->o('v') > 3;
 
-	# $self->l->cc( pr => 'err', fm => "%s: %s: obj: %s",
-	# 	     ls => [ sprintf("%s:%s",__FILE__,__LINE__),
-	# 		     SYNST->[$st], $obj->ldif ] );
+
+      ############################################################
+      ####### ---------------------------------------->>>>>>>>> 1
+      ############################################################
+      if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
 
 	foreach $i ( @{$s} ) {
 	  foreach $svc ( @{$self->cf->get('service', $i, 'plugin')} ) {
-
-	    App::Regather::Plugin->
-		new( $svc, {
-			    cf           => $self->cf,
-			    force        => $self->o('force'),
-			    log          => $self->l,
-			    obj          => $obj,
-			    obj_audit    => $entry,
-			    prog         => sprintf("%s v.%s",
-						    $self->progname,
-						    $VERSION),
-			    rdn          => $rdn,
-			    s            => $i,
-			    st           => $st,
-			    synst        => SYNST,
-			    ts_fmt       => $self->o('ts_fmt'),
-			    v            => $self->o('v'),
-			   } )->ldap_sync_add_modify;
+	    my $opts = {
+			cf           => $self->cf,
+			force        => $self->o('force'),
+			log          => $self->l,
+			obj          => $obj,
+			obj_audit    => $entry,
+			prog         => sprintf("%s v.%s",
+						$self->progname,
+						$VERSION),
+			rdn          => $rdn,
+			s            => $i,
+			st           => $st,
+			synst        => SYNST,
+			ts_fmt       => $self->o('ts_fmt'),
+			v            => $self->o('v'),
+		       };
+	    $self->l->cc( pr => 'debug',
+			  ls => [ __FILE__,__LINE__, $svc, $opts ],
+			  fm => "%s:%s: svc: %s; ldap_sync_add_modify() opts: %s" )
+	      if $self->o('v') > 5;
+	    App::Regather::Plugin->new( $svc, $opts )->ldap_sync_add_modify;
 	  }
 	}
 
-	#######################################################################
-	####### --------------------------------------------------->>>>>>>>> 2
-	#######################################################################
+	##########################################################
+	####### -------------------------------------->>>>>>>>> 2
+	##########################################################
       } elsif ( $st == LDAP_SYNC_DELETE ) {
 
 	foreach $i ( @{$s} ) {
 	  foreach $svc ( @{$self->cf->get('service', $i, 'plugin')} ) {
-
-	    App::Regather::Plugin->
-		new( $svc, {
+	    my $opts = {
 			    cf           => $self->cf,
 			    force        => $self->o('force'),
 			    log          => $self->l,
@@ -676,16 +686,23 @@ consequent accesslog object is provided as well
 			    synst        => SYNST,
 			    ts_fmt       => $self->o('ts_fmt'),
 			    v            => $self->o('v'),
-			   } )->ldap_sync_delete;
+		       };
+	    $self->l->cc( pr => 'debug',
+			  ls => [ __FILE__,__LINE__, $svc, $opts ],
+			  fm => "%s:%s: svc: %s; ldap_sync_delete() opts: %s" )
+	      if $self->o('v') > 5;
+	    App::Regather::Plugin->new( $svc, $opts )->ldap_sync_delete;
 	  }
 	}
 
       }
     } elsif ( defined $syncstate && $syncstate->isa('Net::LDAP::Control::SyncDone') ) {
-      $self->l->cc( pr => 'debug', fm => "%s: Received SYNC DONE CONTROL" )
+      $self->l->cc( pr => 'debug', ls => [ __FILE__,__LINE__ ],
+		    fm => "%s:%s: Received SYNC DONE CONTROL" )
 	if $self->o('v') > 1;
     } elsif ( ! defined $syncstate ) {
-      $self->l->cc( pr => 'warning', fm => "%s: LDAP entry without Sync State control" )
+      $self->l->cc( pr => 'warning', ls => [ __FILE__,__LINE__ ],
+		    fm => "%s:%s: LDAP entry without Sync State control" )
 	if $self->o('v') > 1;
     }
 

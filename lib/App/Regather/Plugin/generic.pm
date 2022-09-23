@@ -95,8 +95,10 @@ sub example_out_file {shift->{example_out_file}}
 
 =head2 ldap_sync_add_modify
 
-writes LDAP entry dump to the file set in config option
+writes LDAP obj and obj_audit dumps to the file set in config option
 service.servicename.out_file
+
+can be used for debug
 
 =cut
 
@@ -105,14 +107,18 @@ sub ldap_sync_add_modify {
 
   my $ts = POSIX::strftime( "%Y-%m-%d %H:%M:%S", localtime());
   
-  $self->log->cc( pr => 'debug', fm => "%s:%s: dn: %s; example: LDAP sync event: %s processing start",
+  $self->log->cc( pr => 'debug',
+		  fm => "%s:%s: dn: %s; example: LDAP sync event: %s processing start",
 		  ls => [ __FILE__,__LINE__, $self->example_dn, SYNST->[$self->syncstate] ]) if $self->v > 0;
 
   open(my $fh, ">>", '/tmp/' . $self->example_out_file) || do {
     print "Can't open > /tmp/" . $self->example_out_file . " for writing: $!"; exit 1; };
 
-  print $fh "\n\n$ts: generic plugin example: LDAP sync event: " . SYNST->[$self->syncstate] . "\n";
+  print $fh "\n\n$ts: generic plugin example: LDAP sync event: " . SYNST->[$self->syncstate] . " obj dump\n";
   $self->obj->dump($fh);
+
+  print $fh "\n\n$ts: generic plugin example: LDAP sync event: " . SYNST->[$self->syncstate] . " obj_audit dump\n";
+  $self->obj_audit->dump($fh);
 
   close($fh) || do {
     print "close $self->example_out_file (opened for writing), failed: $!\n\n"; exit 1; };
