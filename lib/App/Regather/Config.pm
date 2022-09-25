@@ -626,19 +626,24 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 __DATA__
 
 [core]
+# alternative root for resources like config files
 altroot      = STRING :re="^/tmp/.*" :check=chk_dir
 dryrun       = NUMBER :default 0
 gid          = STRING
+# wheather to notify about errors
 notify       = NUMBER :default 0
 notify_email = STRING :mandatory :array :check=chk_notify_email
 pid_file     = STRING :check=chk_dir_pid :default /var/run/openldap/regather.pid
+# Template::Toolkit debug
 tt_debug     = NUMBER :default 0
+# Template::Toolkit .tt files
 tt_path      = STRING :check=chk_dir :default /usr/local/etc/regather.d
 tt_trim      = NUMBER :default 0
 uid          = STRING
 
 [log]
 facility     = STRING :default local4
+# colorization
 colors       = NUMBER :default 0
 foreground   = NUMBER :default 0
 verbosity    = NUMBER :default 0
@@ -660,10 +665,12 @@ ANY          = STRING
 attrs        = STRING
 base         = STRING
 filter       = STRING :mandatory
+# ??
 raw          = STRING
 scope        = STRING :default sub
 sizelimit    = NUMBER :default 0
 timelimit    = NUMBER :default 0
+# suffix of a db for storing the log records, logdb slapo-accesslog(5)
 log_base     = STRING
 
 [ldap bnd]
@@ -704,17 +711,24 @@ verify       = STRING
 all_attr     = NUMBER :default 0
 chmod        = OCTAL  :default 0640
 chown	     = NUMBER :default 1
+# control attribute, must be present for obj to be processed
 ctrl_attr    = STRING :mandatory :array
+# regex to select a definite value for multival attrs
 ctrl_attr_re = STRING
+# regex to match dn to be processed
 ctrl_srv_re  = STRING :mandatory
 gid          = STRING
 notify       = NUMBER :default 0 :check=chk_depend_notify
+# name of attribute to hold hostname
 ns_attr      = STRING
+# name of attribute to hold ip address
 ns_attr_ip   = STRING
 ns_keyfile   = STRING
+# type of DNS query
 ns_rr_type   = STRING :array
 ns_server    = STRING :array
 ns_ttl       = NUMBER :default 600
+# text used to mark records
 ns_txt_pfx   = STRING :default REGATHER:
 ns_zone      = STRING :array
 out_ext      = STRING
@@ -723,6 +737,7 @@ out_file_pfx = STRING
 out_path     = STRING :check=chk_dir
 plugin       = STRING :mandatory :array :check=chk_plugin
 post_process = STRING :array
+# ignore service, don't use for processing
 skip         = NUMBER :default 0
 tt_file      = STRING :check=chk_file_tt
 uid          = STRING

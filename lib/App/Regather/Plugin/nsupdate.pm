@@ -134,11 +134,11 @@ obj is accesslog object
 
     $hostname_old = $hostname = $_{obj}->get_value($ns_attr);
 
-    if ($ns_attr_ip eq 'umiOvpnCfgIfconfigPush') {
-      $ip =
-	(split( / /, $_{obj}->get_value($ns_attr_ip) )
-	)[0];
-    } elsif ($ns_attr_ip eq 'dhcpStatements') {
+    if ( $ns_attr_ip eq 'umiOvpnCfgIfconfigPush' ) {
+      $ip = (
+	     split( / /, $_{obj}->get_value($ns_attr_ip) )
+	    )[0];
+    } elsif ( $ns_attr_ip eq 'dhcpStatements' ) {
 
       $ip = (
 	     split( / /,
