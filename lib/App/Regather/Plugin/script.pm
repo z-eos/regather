@@ -101,16 +101,18 @@ pairs and runs a script
 sub ldap_sync_add_modify {
   my $self = shift;
 
-  $ENV{REGATHER_LDAP_OBJ_DN}             = $self->obj->dn;
-  $ENV{REGATHER_LDAP_OBJ_LDIF}           = $self->obj->ldif;
-  $ENV{REGATHER_LDAP_SYNC_CONTROL_CODE}  = $self->syncstate;
-  $ENV{REGATHER_LDAP_SYNC_CONTROL_NAME}  = SYNST->[$self->syncstate];
-  foreach my $k ($self->obj->attributes) {
-    $ENV{"REGATHER_LDAP_OBJ_ATTR_" . $k} = $self->obj->get_value($k);
-  }
-
   my ($pp, $chin, $chou, $chst, $cher);
   if ( $self->cf->is_set('service', $self->service, 'post_process') ) {
+
+    local %ENV;
+    $ENV{REGATHER_LDAP_OBJ_DN}             = $self->obj->dn;
+    $ENV{REGATHER_LDAP_OBJ_LDIF}           = $self->obj->ldif;
+    $ENV{REGATHER_LDAP_SYNC_CONTROL_CODE}  = $self->syncstate;
+    $ENV{REGATHER_LDAP_SYNC_CONTROL_NAME}  = SYNST->[$self->syncstate];
+    foreach my $k ($self->obj->attributes) {
+      $ENV{"REGATHER_LDAP_OBJ_ATTR_" . $k} = $self->obj->get_value($k);
+    }
+
     foreach $pp ( @{$self->cf->get('service', $self->service, 'post_process')} ) {
       $self->log->cc( pr => 'debug', fm => "%s:%s: dn: %s; LDAP sync event %s processing script: %s",
 		      ls => [ __FILE__,__LINE__, $self->obj->dn, SYNST->[$self->syncstate], $pp ]) if $self->v > 2;
@@ -123,10 +125,9 @@ sub ldap_sync_add_modify {
 	$self->log->cc( pr => 'err', ls => [ __FILE__,__LINE__, $self->service, $pp, $cher ],
 			nt => 1, fm => "%s:%s: service %s post_process: %s, error: %s", );
       }
-
     }
-  }
 
+  }
 }
 
 =head2 ldap_sync_delete

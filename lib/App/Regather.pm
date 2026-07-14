@@ -15,7 +15,7 @@ use List::Util   qw(uniqstr);
 
 use Net::LDAP;
 use Net::LDAP::LDIF;
-use Net::LDAP::Constant qw( 
+use Net::LDAP::Constant qw(
 			    LDAP_CONNECT_ERROR
 			    LDAP_LOCAL_ERROR
 			    LDAP_OPERATIONS_ERROR
@@ -42,7 +42,7 @@ use App::Regather::Plugin;
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 # my @DAEMONARGS = ($0, @ARGV);
-our $VERSION   = '0.85.00';
+our $VERSION   = '0.86.00';
 
 sub new {
   my $class = shift;
@@ -160,7 +160,7 @@ sub run {
   $self->l->cc( pr => 'info', fm => "%s: Dry Run is set on, no file is to be changed\n" )
     if $self->cf->get(qw(core dryrun));
   $self->l->cc( pr => 'info', fm => "%s:%s: Config::Parse object as hash:\n%s",
-	        ls => [ __FILE__,__LINE__, $self->cf->as_hash ] ) if $self->o('v') > 3;
+		ls => [ __FILE__,__LINE__, $self->cf->as_hash ] ) if $self->o('v') > 3;
   $self->l->cc( pr => 'info', fm => "%s:%s: %s",
 		ls => [ __FILE__,__LINE__, $self->progargs ] );
   $self->l->cc( pr => 'info', fm => "%s:%s: %s v.%s is starting ...",
@@ -414,7 +414,7 @@ sub ldap_search_callback {
 
   ######## !! not needed ?
   my $out_file_old;
-  
+
   $self->l->cc( pr => 'debug', fm => "%s:%s: syncstate: %s", ls => [ __FILE__,__LINE__, $syncstate ] )
     if $self->o('v') > 5;
   $self->l->cc( pr => 'debug', fm => "%s:%s: object: %s", ls => [ __FILE__,__LINE__, $obj ] ) if $self->o('v') > 5;
@@ -664,7 +664,7 @@ sub ldap_search_callback {
       if ( $st == LDAP_SYNC_ADD || $st == LDAP_SYNC_MODIFY ) {
 
 	# App::Regather::Plugin->new( 'args', { log    => $self->log,
-	# 				 params => [ 1, 2, 3]} )->run;
+	#				 params => [ 1, 2, 3]} )->run;
 	foreach my $svc ( @{$self->cf->get('service', $s, 'plugin')} ) {
 	  App::Regather::Plugin->new( $svc, {
 					     cf           => $self->cf,
