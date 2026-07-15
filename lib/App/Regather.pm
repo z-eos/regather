@@ -42,7 +42,7 @@ use App::Regather::Plugin;
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 # my @DAEMONARGS = ($0, @ARGV);
-our $VERSION   = '0.86.00';
+our $VERSION   = '0.86.1';
 
 sub new {
   my $class = shift;
@@ -472,24 +472,33 @@ sub ldap_search_callback {
 			      'filter: ', '(reqDN=' . $obj->dn . ')' ] );
 	    return;
 	  } elsif ( defined $entry && $entry->get_value('reqType') eq 'delete' ) {
-	    my $reqold = 'dn: ' . $obj->dn;
-	    foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
-	      s/^(.*;binary:) .*$/$1: c3R1Yg==/agis;
-	      $reqold .= "\n" . $_;
+	    ############################################################################################
+	    # this wrapping condition is for the cases when accesslog overlay wasn't configured        #
+	    # with option/s logops, logold, in which case there is no attribute reqOld                #
+	    ############################################################################################
+	    if ( $entry->exists('reqOld') ) {
+	      my $reqold = 'dn: ' . $obj->dn;
+	      foreach ( @{$entry->get_value('reqOld', asref => 1)} ) {
+		s/^(.*;binary:) .*$/$1: c3R1Yg==/agis;
+		$reqold .= "\n" . $_;
+	      }
+	      my ( $file, @err );
+	      open( $file, "<", \$reqold) ||
+		$self->l->cc( pr => 'err',
+			      fm => "%s:%s: Cannot open data from variable to read ldif: %s",
+			      ls => [ __FILE__,__LINE__, $! ] );
+	      $ldif = Net::LDAP::LDIF->new( $file, "r", onerror => 'warn' );
+	      while ( not $ldif->eof ) {
+		$entry = $ldif->read_entry;
+		$self->l->cc( pr => 'err', fm => "%s:%s: Reading LDIF error: %s",
+			      ls => [ __FILE__,__LINE__, $ldif->error ] ) if $ldif->error;
+	      }
+	      $obj = $entry;
+	      $ldif->done;
+	    } else {
+	      $self->l->cc( pr => 'warning', fm => "%s:%s: %s doesn't have attribute reqOld, so, there is no way to reconstruct the deleted object",
+			    ls => [ __FILE__,__LINE__, $entry->get_value('reqDN') ] );
 	    }
-	    my ( $file, @err );
-	    open( $file, "<", \$reqold) ||
-	      $self->l->cc( pr => 'err',
-			fm => "%s:%s: Cannot open data from variable to read ldif: %s",
-			ls => [ __FILE__,__LINE__, $! ] );
-	    $ldif = Net::LDAP::LDIF->new( $file, "r", onerror => 'warn' );
-	    while ( not $ldif->eof ) {
-	      $entry = $ldif->read_entry;
-	      $self->l->cc( pr => 'err', fm => "%s:%s: Reading LDIF error: %s",
-			ls => [ __FILE__,__LINE__, $ldif->error ] ) if $ldif->error;
-	    }
-	    $obj = $entry;
-	    $ldif->done;
 	  } elsif ( defined $entry && $entry->get_value('reqType') eq 'modify' ) {
 	    ### here we re-assemble $obj to have all attributes before deletion and since
 	    ### after that it'll has ctrl_attr but reqType=delete, it'll go to $st == LDAP_SYNC_DELETE
