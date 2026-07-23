@@ -162,9 +162,10 @@ sub conclude {
 
   $arg{msg} = sprintf $arg{pr_f} . $arg{fm}, @{$arg{ls}};
   if ( $arg{fg} ) {
-    p( sprintf("%s %s",
-	       strftime("%b %e %H:%M:%S", localtime),
-	       $arg{msg}),
+    my $msg = sprintf("%s %s",
+		      strftime("%b %e %H:%M:%S", localtime),
+		      $arg{msg});
+    p( $msg,
        colored     => $self->{colors} && $self->{foreground},
        caller_info => 0,
        colors      => { string => DPC->{$arg{pr}} },

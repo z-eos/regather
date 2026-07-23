@@ -30,7 +30,7 @@ use Net::LDAP::Constant
    );
 
 our $VERSION = '0.3.2';
-print "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
+
 my %_opt =
   (
    host     => '',
