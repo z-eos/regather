@@ -42,7 +42,7 @@ use App::Regather::Plugin;
 use constant SYNST => [ qw( LDAP_SYNC_PRESENT LDAP_SYNC_ADD LDAP_SYNC_MODIFY LDAP_SYNC_DELETE ) ];
 
 # my @DAEMONARGS = ($0, @ARGV);
-our $VERSION   = '0.86.1';
+our $VERSION   = '0.87.0';
 
 sub new {
   my $class = shift;
@@ -171,24 +171,23 @@ sub run {
   $self->daemonize if ! $self->o('fg');
 
   our $s;
-  my  $tmp;
   my  $cfgattrs = [];
   my  $mesg;
   my  @svc_map;
 
   foreach my $i ( @{$self->{_opt}{svc}} ) {
+    push @$cfgattrs, $self->cf->get('service', $i, 'ctrl_attr');
     foreach ( qw( s m ) ) {
       if ( $self->cf->is_section('service', $i, 'map', $_) ) {
 	@svc_map = values( %{ $self->cf->getnode('service', $i, 'map', $_)->as_hash } );
 	# push @svc_map, $self->cf->getnode('service', $i, 'ctrl_attr');
-	$cfgattrs = [ @{$cfgattrs}, @svc_map, @{$self->cf->get('service', $i, 'ctrl_attr')} ];
+	push @$cfgattrs, @svc_map;
       } else {
 	@svc_map = ();
       }
     }
 
-    push @{$cfgattrs}, '*'
-      if $self->cf->get('service', $i, 'all_attr') != 0;
+    push @{$cfgattrs}, '*' if $self->cf->get('service', $i, 'all_attr') != 0;
 
     $self->l->cc( pr => 'warning', ls => [ __FILE__,__LINE__, $i, ],
 		  fm => "%s:%s: no LDAP attribute to process is mapped for service `%s`" )
@@ -196,16 +195,18 @@ sub run {
 
   }
 
-  @{$tmp} = sort @{[ @{$cfgattrs}, qw( associatedDomain
-				       authorizedService
-				       description
-				       entryUUID
-				       entryCSN
-				       createTimestamp
-				       creatorsName
-				       modifiersName
-				       modifyTimestamp ) ]};
-  @{$cfgattrs} = uniqstr @{$tmp};
+  @{$cfgattrs} = uniqstr( sort( @{$cfgattrs},
+				qw(
+				    associatedDomain
+				    authorizedService
+				    description
+				    entryUUID
+				    entryCSN
+				    createTimestamp
+				    creatorsName
+				    modifiersName
+				    modifyTimestamp
+				 ) ) );
 
   #
   ## -=== MAIN LOOP =====================================================-
@@ -249,9 +250,19 @@ sub run {
 	  next;
 	}
       } else {
-	$self->l->cc( pr => 'info', fm => "%s: TLS negotiation succeeded" ) if $self->o('v') > 1;
+	$self->l->cc( pr => 'info', fm => "%s:%s: TLS negotiation succeeded", ls => [ __FILE__,__LINE__ ] ) if $self->o('v') > 1;
+      }
+    } else {
+      if ( exists $start_tls_options->{ssl} && $start_tls_options->{ssl} eq 'none' ) {
+	$self->l->cc( pr => 'warning', fm => "%s:%s: TLS is explicitly disabled in the configuration file. LDAP traffic is transmitted in plaintext without encryption.",
+		      ls => [ __FILE__,__LINE__ ] );
+      } else {
+	$self->l->cc( pr => 'warning', fm => "%s:%s: TLS is not configured, LDAP connection is unencrypted. Configure TLS in the config file, or explicitly set [ldap ssl] option 'ssl = none' to permit plaintext LDAP.",
+		      ls => [ __FILE__,__LINE__ ] );
+	exit 1
       }
     }
+
 
     my $bind = $self->cf->getnode(qw(ldap bnd))->as_hash if $self->cf->is_section(qw(ldap bnd));
     if ( ref($bind) eq 'HASH' ) {
@@ -432,9 +443,9 @@ sub ldap_search_callback {
       ####### --- PRELIMINARY STUFF ----------------------------->>>>>>>>> 0
       #######################################################################
 
-      ### LDAP_SYNC_DELETE arrives for both cases, object deletetion and attribute
-      ### deletion and in both cases Net::LDAP::Entry obj, provided contains only DN,
-      ### so, we need to "re-construct" it for further processing
+      ### on object deletion, event LDAP_SYNC_DELETE is reported and returned object has reqType=delete
+      ### on attr   deletion, event LDAP_SYNC_MODIFY is reported and returned object has reqType=modify
+      ### here is an attempt to reconstruct the onject by it's reqDN
       if ( $st == LDAP_SYNC_DELETE ) {
 	$mesg = $self->o('ldap')->search( base     => $self->cf->get(qw(ldap srch log_base)),
 			       scope    => 'sub',
@@ -500,6 +511,9 @@ sub ldap_search_callback {
 			    ls => [ __FILE__,__LINE__, $entry->get_value('reqDN') ] );
 	    }
 	  } elsif ( defined $entry && $entry->get_value('reqType') eq 'modify' ) {
+	    ### ???
+	    ### ??? modify never appears for LDAP_SYNC_DELETE
+	    ### ???
 	    ### here we re-assemble $obj to have all attributes before deletion and since
 	    ### after that it'll has ctrl_attr but reqType=delete, it'll go to $st == LDAP_SYNC_DELETE
 	    %reqmod = map  { substr($_, 0, -2) => 1 } grep { /^(.*):-$/g }
@@ -524,6 +538,9 @@ sub ldap_search_callback {
 	    }
 	    $self->l->cc( pr => 'debug', fm => "%s:%s: %s reqType=modify reqMod: %s",
 		      ls => [ __FILE__,__LINE__, SYNST->[$st], \%reqmod ] )	if $self->o('v') > 3;
+	    ### ???
+	    ### ??? modify never appears for LDAP_SYNC_DELETE
+	    ### ???
 	  } else {
 	    $self->l->cc( pr => 'err', nt => 1,
 		      fm => "%s:%s: LDAP accesslog search on %s, returned an object but it's something wrong with it:\n% 13s%s\n% 13s%s\n% 13s%s\n\n",
